@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Install omodi on Linux.
 #
-# Creates a virtualenv, installs omodi in it and symlinks the `omodi`
+# Creates a virtualenv (or updates the existing one), installs omodi in it and symlinks the `omodi`
 # executable into a directory of your PATH (default: ~/.local/bin).
 #
 # Works from a local checkout (./install.sh) or straight from GitHub:
@@ -61,7 +61,13 @@ import sys
 sys.exit(0 if sys.version_info >= (3, 9) else 1)
 EOF
 
-echo "Creating virtualenv in ${PREFIX}"
+OLD_VERSION=""
+if [ -x "${PREFIX}/bin/omodi" ]; then
+    OLD_VERSION="$("${PREFIX}/bin/omodi" --version 2>/dev/null || true)"
+    echo "Existing install found (${OLD_VERSION:-unknown version}), updating in ${PREFIX}"
+else
+    echo "Creating virtualenv in ${PREFIX}"
+fi
 python3 -m venv "$PREFIX"
 
 EXTRA=""
@@ -75,7 +81,10 @@ else
     echo "Installing omodi from https://github.com/${REPO} (${REF})"
 fi
 "${PREFIX}/bin/python" -m pip install --quiet --upgrade pip
-"${PREFIX}/bin/python" -m pip install --quiet "$TARGET"
+# --force-reinstall --no-deps makes sure omodi itself is refreshed even when
+# the version number did not change (e.g. installing from a branch).
+"${PREFIX}/bin/python" -m pip install --quiet --upgrade --force-reinstall --no-deps "$TARGET"
+"${PREFIX}/bin/python" -m pip install --quiet --upgrade "$TARGET"
 
 mkdir -p "$BIN_DIR"
 ln -sf "${PREFIX}/bin/omodi" "$LINK"
@@ -86,4 +95,12 @@ case ":${PATH}:" in
     *) echo "warning: ${BIN_DIR} is not in your PATH; add it to your shell profile" ;;
 esac
 
+NEW_VERSION="$("${PREFIX}/bin/omodi" --version 2>/dev/null || true)"
+if [ -n "$OLD_VERSION" ] && [ "$OLD_VERSION" != "$NEW_VERSION" ]; then
+    echo "Updated: ${OLD_VERSION} -> ${NEW_VERSION}"
+elif [ -n "$OLD_VERSION" ]; then
+    echo "Reinstalled: ${NEW_VERSION}"
+else
+    echo "Installed: ${NEW_VERSION}"
+fi
 echo "Done. Try: omodi --version"

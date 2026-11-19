@@ -27,6 +27,7 @@ cd omodi
 [`install.sh`](install.sh) creates a virtualenv in `~/.local/share/omodi`, installs
 omodi in it and creates a symlink `~/.local/bin/omodi` pointing to the executable.
 Make sure `~/.local/bin` is in your `PATH`.
+Re-running the script on an existing install updates it in place.
 
 Options:
 
