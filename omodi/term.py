@@ -9,6 +9,7 @@ import os
 import re
 import shutil
 import sys
+import textwrap
 
 _CODES = {"bold": "1", "dim": "2", "red": "31", "green": "32", "yellow": "33", "blue": "34",
           "magenta": "35", "cyan": "36", "gray": "90", "white": "97"}
@@ -90,18 +91,33 @@ class Style:
     def num(self, n, col):
         return self(n, col, "bold") if n else self(0, "gray")
 
-    def table(self, header, rows, right=(), indent=2):
-        """Aligned table: header dim + underline, cells already styled; `right` = right-aligned column indexes."""
+    def table(self, header, rows, right=(), indent=2, wrap_last=False):
+        """Aligned table: header bold + underline, cells already styled; `right` = right-aligned column indexes.
+
+        With `wrap_last`, the last column holds plain text that is wrapped to the terminal width
+        (continuation lines stay aligned under that column).
+        """
         widths = [max(visible_len(str(r[i])) for r in ([header] if header else []) + rows)
                   for i in range(len(rows[0]))]
+        last = len(widths) - 1
         sp = " " * indent
+        wrapped = None
+        if wrap_last:
+            room = max(term_width() - indent - sum(widths[:last]) - 2 * last, 30)
+            wrapped = [textwrap.wrap(str(r[last]), room) or [""] for r in rows]
+            widths[last] = max([visible_len(str(header[last])) if header else 0]
+                               + [len(x) for w in wrapped for x in w])
         lines = []
         if header:
-            lines.append(sp + "  ".join(pad(self(h, "gray"), w, i in right)
+            lines.append(sp + "  ".join(pad(self(h, "bold"), w, i in right)
                                         for i, (h, w) in enumerate(zip(header, widths))).rstrip())
             lines.append(sp + self("  ".join("─" * w for w in widths), "gray"))
-        for r in rows:
-            last = len(widths) - 1
-            lines.append(sp + "  ".join(pad(str(c), w, i in right) if i < last or i in right else str(c)
-                                        for i, (c, w) in enumerate(zip(r, widths))))
+        for n, r in enumerate(rows):
+            cells = [pad(str(c), w, i in right) if i < last or i in right else str(c)
+                     for i, (c, w) in enumerate(zip(r, widths))]
+            if wrapped:
+                cells[last] = wrapped[n][0]
+            lines.append(sp + "  ".join(cells))
+            for extra in (wrapped[n][1:] if wrapped else []):
+                lines.append(sp + "  ".join(" " * w for w in widths[:last]) + "  " + extra)
         return lines

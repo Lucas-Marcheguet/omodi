@@ -740,13 +740,13 @@ def render_console(report, style=None):
     for module, mod in report["modules"].items():
         c, cl = mod["counts"], mod["closure"]
         out.append(st.title(module))
-        chips = "   ".join(st(f"{LEVEL_STYLE[lv][1]} {c[lv]} {LEVEL_LABELS[lv]}", LEVEL_STYLE[lv][0], "bold")
-                           if c[lv] else st(f"{LEVEL_STYLE[lv][1]} 0 {LEVEL_LABELS[lv]}", "gray") for lv in LEVELS)
-        out.append(f"  {chips}   " + st.bar([(c[lv], LEVEL_STYLE[lv][0]) for lv in LEVELS], 20))
-        out.append("  " + st("deps ", "gray") + (", ".join(cl["upstream"]) or st("none", "gray"))
-                   + st(f"  ({len(cl['upstream'])})", "gray"))
+        out.append("  " + "   ".join(
+            st(f"{LEVEL_STYLE[lv][1]} {c[lv]} {LEVEL_LABELS[lv]}", LEVEL_STYLE[lv][0], "bold") if c[lv]
+            else st(f"{LEVEL_STYLE[lv][1]} 0 {LEVEL_LABELS[lv]}", "gray") for lv in LEVELS))
         if cl["missing_in_new"]:
-            out.append("  " + st("✖ gone in new: ", "red", "bold") + st(", ".join(cl["missing_in_new"]), "red"))
+            out.append("  " + st("✖ dependencies removed in the new version: ", "red", "bold")
+                       + st(", ".join(cl["missing_in_new"]), "red"))
+        prefix = module + "/"
         for level in LEVELS:
             items = [f for f in mod["findings"] if f["level"] == level]
             if not items:
@@ -757,14 +757,16 @@ def render_console(report, style=None):
             for f in items:
                 up = f["upstream"]
                 target = up.get("name", "") + (f" ➜ {up['to_module']}" if up.get("to_module") else "")
-                note = st(" ~", "magenta") if f["confidence"] == "heuristic" else ""
-                rows.append([st(f["category"], col), st(f["custom"]["loc"] or f["custom"]["module"], "cyan"),
-                             st(target, "white") if target else st("-", "gray"), f["message"] + note])
-            out += st.table(["category", "custom", "upstream", "finding"], rows, indent=4)
+                where = f["custom"]["loc"] or f["custom"]["module"]
+                where = where[len(prefix):] if where.startswith(prefix) else where
+                where = where if len(where) <= 28 else "…" + where[-27:]
+                target = term.truncate(target, 26)
+                rows.append([st(f["category"], col), st(where, "cyan"), st(target, "white") if target else st("-", "gray"),
+                             f["message"] + (" (heuristic)" if f["confidence"] == "heuristic" else "")])
+            out += st.table(["Type", "Custom file", "Odoo element", "What changed"], rows, indent=4, wrap_last=True)
         out.append("")
-    out.append(st("legend  ", "gray") + st("~", "magenta") + st(" = heuristic finding", "gray"))
     if report["limits"]:
-        out += [""] + [st("  limits", "gray", "bold")] + [st(f"  · {x}", "gray") for x in report["limits"]]
+        out += [st("  limits", "gray", "bold")] + [st(f"  · {x}", "gray") for x in report["limits"]]
     out.append("")
     return "\n".join(out)
 

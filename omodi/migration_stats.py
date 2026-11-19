@@ -117,72 +117,63 @@ def unlisted_added(old_idx, new_idx, listed):
 
 
 def print_table(title, rows, top, st=None):
+    """Top-N table: one row per module / model, one column per family, each cell `-removed +added ~modified`."""
     st = st or term.Style()
-    cols = [("fi-", "fields_removed", "red"), ("fi+", "fields_added", "green"), ("fi~", "fields_modified", "yellow"),
-            ("det+", "field_attrs_added", "green"), ("me-", "methods_removed", "red"),
-            ("me+", "methods_added", "green"), ("me~", "methods_modified", "yellow"),
-            ("vw-", "views_removed", "red"), ("vw+", "views_added", "green"), ("vw~", "views_modified", "yellow")]
+    fams = [("Fields", "fields"), ("Methods", "methods"), ("Views", "views")]
+    suffixes = ("removed", "added", "modified")
     rows = [r for r in rows if r[0] != "TOTAL"]
-    main = [k for _, k, _ in cols if k != "field_attrs_added"]
-    rows = sorted(rows, key=lambda kv: -sum(kv[1].get(k, 0) for k in main))[:top]
+    total = lambda c: sum(c.get(f"{f}_{x}", 0) for _, f in fams for x in suffixes)
+    rows = sorted((r for r in rows if total(r[1])), key=lambda kv: -total(kv[1]))[:top]
     if not rows:
         return
     print("\n" + st.title(title))
-    body = [[st(term.truncate(str(name), 40), "cyan")] + [st.num(c.get(k, 0), col) for _, k, col in cols]
-            for name, c in rows]
-    print("\n".join(st.table([""] + [h for h, _, _ in cols], body, right=range(1, len(cols) + 1))))
+    body = []
+    for name, c in rows:
+        cells = [st.delta(*(c.get(f"{f}_{x}", 0) for x in suffixes)) if any(c.get(f"{f}_{x}", 0) for x in suffixes)
+                 else st("·", "gray") for _, f in fams]
+        body.append([st(term.truncate(str(name), 40), "cyan")] + cells)
+    print("\n".join(st.table(["Name"] + [h for h, _ in fams], body)))
 
 
 def print_summary(a, total, modules, models, gone, elapsed, st=None):
-    """Colored summary: one line per family with -removed +added ~modified."""
+    """Colored summary: one row per family that changed, with removed / added / modified columns."""
     st = st or term.Style()
     g = lambda k: total.get(k, 0)
     print("\n" + st(" OMODI ", "bold", "white") + "  " + st("migration stats", "bold") + "  "
           + st(a.old_label, "cyan", "bold") + st(" ➜ ", "gray") + st(a.new_label, "green", "bold")
           + st(f"   {len(modules)} modules · {len(models)} models · {elapsed:.1f}s", "gray"))
     if gone:
-        print(st("  ✖ removed modules: ", "red", "bold") + st(", ".join(gone), "red"))
-    print()
-    rows = [
-        ("Fields", st.delta(g("fields_removed"), g("fields_added"), g("fields_modified")),
-         st(f"attrs +{g('field_attrs_added')} -{g('field_attrs_removed')} ~{g('field_attrs_changed')}"
-            f" · type changed {g('field_type_changed')} · moved {g('fields_moved_out')}", "gray"),
-         [(g("fields_removed"), "red"), (g("fields_added"), "green"), (g("fields_modified"), "yellow")]),
-        ("Methods", st.delta(g("methods_removed"), g("methods_added"), g("methods_modified")),
-         st(f"moved {g('methods_moved_out')}", "gray"),
-         [(g("methods_removed"), "red"), (g("methods_added"), "green"), (g("methods_modified"), "yellow")]),
-        ("Views", st.delta(g("views_removed"), g("views_added"), g("views_modified")),
-         st(f"nodes -{g('view_nodes_removed')} +{g('view_nodes_added')}", "gray"),
-         [(g("views_removed"), "red"), (g("views_added"), "green"), (g("views_modified"), "yellow")]),
-        ("Constraints", st.delta(g("constraints_removed"), g("constraints_added"), g("constraints_modified")),
-         st(f"class attrs ~{g('attributes_modified')}", "gray"),
-         [(g("constraints_removed"), "red"), (g("constraints_added"), "green"), (g("constraints_modified"), "yellow")]),
-        ("QWeb", st.delta(g("templates_removed"), g("templates_added"), g("templates_modified")),
-         st(f"nodes -{g('template_nodes_removed')} +{g('template_nodes_added')}", "gray"),
-         [(g("templates_removed"), "red"), (g("templates_added"), "green"), (g("templates_modified"), "yellow")]),
-        ("OWL", st.delta(g("owl_templates_removed"), g("owl_templates_added"), g("owl_templates_modified")), "",
-         [(g("owl_templates_removed"), "red"), (g("owl_templates_added"), "green"),
-          (g("owl_templates_modified"), "yellow")]),
-        ("JS files", st.delta(g("js_files_removed"), g("js_files_added"), g("js_files_modified")),
-         st(f"lines -{g('js_lines_removed')} +{g('js_lines_added')}", "gray"),
-         [(g("js_files_removed"), "red"), (g("js_files_added"), "green"), (g("js_files_modified"), "yellow")]),
-        ("JS exports", st.delta(g("js_exports_removed"), g("js_exports_added")),
-         st(f"moved {g('js_exports_moved_out')}", "gray"),
-         [(g("js_exports_removed"), "red"), (g("js_exports_added"), "green")]),
-        ("JS classes", st.delta(g("js_classes_removed"), g("js_classes_added"), g("js_classes_modified")),
-         st(f"methods -{g('js_methods_removed')} +{g('js_methods_added')}", "gray"),
-         [(g("js_classes_removed"), "red"), (g("js_classes_added"), "green"), (g("js_classes_modified"), "yellow")]),
-        ("Registries", st.delta(g("js_registries_removed"), g("js_registries_added"), g("js_registries_modified")), "",
-         [(g("js_registries_removed"), "red"), (g("js_registries_added"), "green"),
-          (g("js_registries_modified"), "yellow")]),
-        ("Patches", st.delta(g("js_patches_removed"), g("js_patches_added"), g("js_patches_modified")), "",
-         [(g("js_patches_removed"), "red"), (g("js_patches_added"), "green"), (g("js_patches_modified"), "yellow")]),
-        ("Assets", st.delta(g("assets_entries_removed"), g("assets_entries_added")), "",
-         [(g("assets_entries_removed"), "red"), (g("assets_entries_added"), "green")]),
+        print(st("  ✖ modules removed in the new version: ", "red", "bold") + st(", ".join(gone), "red"))
+    # (label, key prefix, has "modified" column, details shown only when non-zero)
+    families = [
+        ("Fields", "fields", True, [("attributes added", "field_attrs_added"), ("attributes removed", "field_attrs_removed"),
+                                    ("type changed", "field_type_changed"), ("moved to another module", "fields_moved_out")]),
+        ("Methods", "methods", True, [("moved to another module", "methods_moved_out")]),
+        ("Views", "views", True, [("nodes removed", "view_nodes_removed"), ("nodes added", "view_nodes_added")]),
+        ("Constraints", "constraints", True, []),
+        ("QWeb templates", "templates", True, [("nodes removed", "template_nodes_removed"),
+                                               ("nodes added", "template_nodes_added")]),
+        ("OWL templates", "owl_templates", True, []),
+        ("JS files", "js_files", True, [("lines removed", "js_lines_removed"), ("lines added", "js_lines_added")]),
+        ("JS exports", "js_exports", False, [("moved to another module", "js_exports_moved_out")]),
+        ("JS classes", "js_classes", True, [("methods removed", "js_methods_removed"), ("methods added", "js_methods_added")]),
+        ("JS registries", "js_registries", True, []),
+        ("JS patches", "js_patches", True, []),
+        ("Assets", "assets_entries", False, []),
     ]
-    table_rows = [[st(label, "bold"), delta, st.bar(parts, 16), extra] for label, delta, extra, parts in rows]
-    # delta cells have different visible widths: table() pads them
-    print("\n".join(st.table(None, table_rows)))
+    body = []
+    for label, key, has_mod, details in families:
+        r, ad, mo = g(f"{key}_removed"), g(f"{key}_added"), g(f"{key}_modified") if has_mod else 0
+        if not (r or ad or mo):
+            continue
+        body.append([st(label, "bold"), st.num(r, "red"), st.num(ad, "green"),
+                     st.num(mo, "yellow") if has_mod else st("-", "gray"),
+                     ", ".join(f"{n} {g(k)}" for n, k in details if g(k))])
+    print()
+    if not body:
+        print(st("  No change detected.", "gray"))
+        return
+    print("\n".join(st.table(["", "Removed", "Added", "Modified", "Details"], body, right=(1, 2, 3), wrap_last=True)))
 
 
 def main(argv=None):
