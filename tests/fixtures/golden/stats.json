@@ -1,0 +1,69 @@
+{
+ "old_label": "old",
+ "new_label": "new",
+ "modules_requested": [
+  "sale_demo"
+ ],
+ "modules_removed": [],
+ "modules_new": [],
+ "modules_unknown": [],
+ "models_checked": [
+  "sale.order"
+ ],
+ "total": {
+  "fields_removed": 1,
+  "fields_added": 1,
+  "fields_modified": 1,
+  "field_attrs_changed": 2,
+  "methods_removed": 1,
+  "methods_added": 1,
+  "methods_modified": 1,
+  "attributes_modified": 1,
+  "views_modified": 1,
+  "view_nodes_added": 1
+ },
+ "by_module": {
+  "sale_demo": {
+   "fields_removed": 1,
+   "fields_added": 1,
+   "fields_modified": 1,
+   "field_attrs_changed": 2,
+   "methods_removed": 1,
+   "methods_added": 1,
+   "methods_modified": 1,
+   "attributes_modified": 1,
+   "views_modified": 1,
+   "view_nodes_added": 1
+  }
+ },
+ "by_model": {
+  "sale.order": {
+   "fields_removed": 1,
+   "fields_added": 1,
+   "fields_modified": 1,
+   "field_attrs_changed": 2,
+   "methods_removed": 1,
+   "methods_added": 1,
+   "methods_modified": 1,
+   "attributes_modified": 1,
+   "views_modified": 1,
+   "view_nodes_added": 1
+  }
+ },
+ "by_module_model": [
+  {
+   "module": "sale_demo",
+   "model": "sale.order",
+   "fields_removed": 1,
+   "fields_added": 1,
+   "fields_modified": 1,
+   "field_attrs_changed": 2,
+   "methods_removed": 1,
+   "methods_added": 1,
+   "methods_modified": 1,
+   "attributes_modified": 1,
+   "views_modified": 1,
+   "view_nodes_added": 1
+  }
+ ]
+}

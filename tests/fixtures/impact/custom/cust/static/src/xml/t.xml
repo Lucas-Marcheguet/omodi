@@ -1,0 +1,5 @@
+<templates>
+  <t t-name="cust.A" t-inherit="up.TplGone" t-inherit-mode="extension"><xpath expr="//span" position="inside"><b/></xpath></t>
+  <t t-name="cust.B" t-inherit="up.Tpl" t-inherit-mode="extension"><xpath expr="//div" position="inside"><b/></xpath></t>
+  <t t-name="cust.C"><t t-call="up.TplGone"/></t>
+</templates>

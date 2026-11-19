@@ -1,0 +1,66 @@
+{
+ "format": "odoo-model-extract/1",
+ "model": "sale.order",
+ "label": "old",
+ "paths": [
+  "tests/fixtures/legacy/old"
+ ],
+ "modules": {
+  "sale_demo": {
+   "attributes": {
+    "_inherit": {
+     "value": "'sale.order'",
+     "loc": "sale_demo/models/sale_order.py:5"
+    },
+    "_order": {
+     "value": "'id desc'",
+     "loc": "sale_demo/models/sale_order.py:6"
+    }
+   },
+   "fields": {
+    "gone_field": {
+     "type": "Integer",
+     "attrs": {},
+     "loc": "sale_demo/models/sale_order.py:9"
+    },
+    "note2": {
+     "type": "Char",
+     "attrs": {
+      "string": "'Note'",
+      "required": "True"
+     },
+     "loc": "sale_demo/models/sale_order.py:8"
+    }
+   },
+   "methods": {
+    "_compute_x": {
+     "signature": "self",
+     "decorators": [
+      "api.depends('note2')"
+     ],
+     "loc": "sale_demo/models/sale_order.py:15"
+    },
+    "action_old": {
+     "signature": "self, a",
+     "decorators": [],
+     "loc": "sale_demo/models/sale_order.py:11"
+    }
+   },
+   "constraints": {},
+   "views": {
+    "sale_demo.view_order_form": {
+     "inherit_id": null,
+     "type": null,
+     "mode": null,
+     "priority": null,
+     "arch_hash": "e6c4781631f4bfeee57bf900c641c66884e84318",
+     "nodes": [
+      "form[]",
+      "field[name=note2]"
+     ],
+     "loc": "sale_demo/views/v.xml"
+    }
+   }
+  }
+ }
+}

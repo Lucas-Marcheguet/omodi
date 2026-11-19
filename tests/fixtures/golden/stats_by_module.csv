@@ -1,0 +1,3 @@
+module,fields_removed,fields_added,fields_modified,fields_moved_out,fields_moved_in,field_attrs_added,field_attrs_removed,field_attrs_changed,field_type_changed,methods_removed,methods_added,methods_modified,methods_moved_out,methods_moved_in,constraints_removed,constraints_added,constraints_modified,attributes_modified,views_removed,views_added,views_modified,view_nodes_removed,view_nodes_added
+sale_demo,1,1,1,0,0,0,0,2,0,1,1,1,0,0,0,0,0,1,0,0,1,0,1
+TOTAL,1,1,1,0,0,0,0,2,0,1,1,1,0,0,0,0,0,1,0,0,1,0,1

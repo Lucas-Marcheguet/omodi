@@ -1,0 +1,135 @@
+{
+ "format": "odoo-model-diff/1",
+ "model": "sale.order",
+ "old_label": "old",
+ "new_label": "new",
+ "modules": {
+  "only_old": [],
+  "only_new": []
+ },
+ "fields": {
+  "removed": [
+   {
+    "module": "sale_demo",
+    "name": "gone_field",
+    "type": "Integer",
+    "loc": "sale_demo/models/sale_order.py:9"
+   }
+  ],
+  "added": [
+   {
+    "module": "sale_demo",
+    "name": "new_field",
+    "type": "Integer",
+    "loc": "sale_demo/models/sale_order.py:9"
+   }
+  ],
+  "modified": [
+   {
+    "module": "sale_demo",
+    "name": "note2",
+    "changes": {
+     "attrs": {
+      "required": {
+       "old": "True",
+       "new": "False"
+      },
+      "string": {
+       "old": "'Note'",
+       "new": "'Remark'"
+      }
+     }
+    }
+   }
+  ],
+  "moved": []
+ },
+ "methods": {
+  "removed": [
+   {
+    "module": "sale_demo",
+    "name": "_compute_x",
+    "loc": "sale_demo/models/sale_order.py:15"
+   }
+  ],
+  "added": [
+   {
+    "module": "sale_demo",
+    "name": "action_new",
+    "loc": "sale_demo/models/sale_order.py:14"
+   }
+  ],
+  "modified": [
+   {
+    "module": "sale_demo",
+    "name": "action_old",
+    "changes": {
+     "signature": {
+      "old": "self, a",
+      "new": "self, a, b=None"
+     }
+    }
+   }
+  ],
+  "moved": []
+ },
+ "constraints": {
+  "removed": [],
+  "added": [],
+  "modified": []
+ },
+ "views": {
+  "removed": [],
+  "added": [],
+  "modified": [
+   {
+    "module": "sale_demo",
+    "name": "sale_demo.view_order_form",
+    "changes": {
+     "arch": {
+      "nodes_removed": [],
+      "nodes_added": [
+       "field[name=new_field]"
+      ]
+     }
+    }
+   }
+  ]
+ },
+ "attributes": {
+  "modified": [
+   {
+    "module": "sale_demo",
+    "name": "_order",
+    "old": "'id desc'",
+    "new": "'date_order desc'"
+   }
+  ]
+ },
+ "stats": {
+  "sale_demo": {
+   "fields_removed": 1,
+   "fields_added": 1,
+   "fields_modified": 1,
+   "field_attrs_changed": 2,
+   "methods_removed": 1,
+   "methods_added": 1,
+   "methods_modified": 1,
+   "attributes_modified": 1,
+   "views_modified": 1,
+   "view_nodes_added": 1
+  }
+ },
+ "stats_total": {
+  "fields_removed": 1,
+  "fields_added": 1,
+  "fields_modified": 1,
+  "field_attrs_changed": 2,
+  "methods_removed": 1,
+  "methods_added": 1,
+  "methods_modified": 1,
+  "attributes_modified": 1,
+  "views_modified": 1,
+  "view_nodes_added": 1
+ }
+}

@@ -1,0 +1,5 @@
+<templates xml:space="preserve">
+  <t t-name="demo.Widget"><div class="a"/></t>
+  <t t-name="demo.Gone"><span/></t>
+  <t t-inherit="web.Other" t-inherit-mode="extension"><xpath expr="//div" position="inside"><span/></xpath></t>
+</templates>

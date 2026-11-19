@@ -1,0 +1,3 @@
+<odoo>
+  <record id="act_moved" model="ir.actions.act_window"><field name="name">Moved</field><field name="res_model">up.thing</field></record>
+</odoo>

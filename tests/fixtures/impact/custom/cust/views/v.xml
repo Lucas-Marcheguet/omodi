@@ -1,0 +1,18 @@
+<odoo>
+  <record id="thing_form_cust" model="ir.ui.view">
+    <field name="name">cust.thing.form</field>
+    <field name="inherit_id" ref="up.thing_form"/>
+    <field name="arch" type="xml">
+      <xpath expr="//field[@name='f_removed']" position="after"><field name="f_custom_only"/><field name="f_removed"/></xpath>
+      <xpath expr="//group[@name='grp']" position="inside"><field name="f_type"/></xpath>
+    </field>
+  </record>
+  <template id="tpl_cust_gone" inherit_id="up.tpl_gone"><xpath expr="//p" position="inside"><b/></xpath></template>
+  <template id="tpl_cust_base" inherit_id="up.tpl_base"><xpath expr="//div[@class='removed_cls']" position="inside"><i/></xpath></template>
+  <template id="tpl_cust_mod" inherit_id="up.tpl_mod"><xpath expr="//div[@class='a']" position="inside"><i/></xpath></template>
+  <template id="tpl_cust_call"><t t-call="up.tpl_gone"/></template>
+  <record id="g1" model="res.groups"><field name="name">G1</field><field name="implied_ids" eval="[(4, ref('up.group_gone'))]"/></record>
+  <record id="g2" model="res.groups"><field name="name">G2</field><field name="implied_ids" eval="[(4, ref('up.group_ok'))]"/></record>
+  <menuitem id="menu_cust" name="Menu" action="up.act_moved" groups="up.group_gone,up.group_ok"/>
+  <record id="r_unknown" model="ir.rule"><field name="name">R</field><field name="groups" eval="[(4, ref('other.unknown'))]"/></record>
+</odoo>

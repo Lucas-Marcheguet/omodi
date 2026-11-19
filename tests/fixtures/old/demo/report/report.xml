@@ -1,0 +1,17 @@
+<odoo>
+  <record id="action_report_demo" model="ir.actions.report">
+    <field name="name">Demo</field>
+    <field name="model">sale.order</field>
+    <field name="report_name">demo.report_demo</field>
+  </record>
+  <report id="action_report_tag" model="sale.order" name="demo.report_tag" string="Tag"/>
+  <template id="report_demo">
+    <t t-call="web.html_container"><div class="page">Hi</div></t>
+  </template>
+  <template id="report_demo_ext" inherit_id="report_demo" priority="20">
+    <xpath expr="//div" position="inside"><span>old</span></xpath>
+  </template>
+  <template id="report_tag"><div>tag</div></template>
+  <template id="portal_thing"><div t-call="portal.x"/></template>
+  <template id="portal_old"><p>gone</p></template>
+</odoo>

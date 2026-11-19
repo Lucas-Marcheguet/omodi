@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "omodi"
+version = "0.1.0"
+description = "Stats de migration entre deux versions d'Odoo (modèles, QWeb, OWL, JS)"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.optional-dependencies]
+js = ["tree-sitter>=0.22", "tree-sitter-javascript"]
+
+[project.scripts]
+omodi = "omodi.cli:main"
+
+[tool.setuptools]
+packages = ["omodi"]
