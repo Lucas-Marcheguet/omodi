@@ -7,7 +7,7 @@ import unittest
 from omodi import compare, js, migration_stats
 from tests.helpers import OLD, NEW, quiet
 
-needs_ts = unittest.skipUnless(js.HAS_TREE_SITTER, "tree-sitter non installé")
+needs_ts = unittest.skipUnless(js.HAS_TREE_SITTER, "tree-sitter not installed")
 
 
 def run(tmp, *extra):
@@ -30,7 +30,7 @@ class OrchestratorTest(unittest.TestCase):
                 self.assertTrue(os.path.isfile(os.path.join(tmp, v, "sale.order.json")))
             stats = jload(tmp, "stats.json")
             demo = stats["by_module"]["demo"]
-            # QWeb rattachés (sale.order) + non rattachés (module)
+            # attached QWeb (sale.order) + unattached (module)
             self.assertEqual((demo["templates_removed"], demo["templates_added"], demo["templates_modified"]),
                              (1, 1, 2))
             self.assertEqual((demo["template_nodes_removed"], demo["template_nodes_added"]), (1, 2))
@@ -66,7 +66,7 @@ class OrchestratorTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             quiet(migration_stats.main, ["--old", OLD, "--new", NEW, "--modules", "demo", "-o", tmp])
             d = jload(tmp, "stats.json")["by_module"]["demo"]
-            self.assertEqual(d["js_exports_moved_out"], 2)    # helper (intra) + movable (vers demo2 non listé)
+            self.assertEqual(d["js_exports_moved_out"], 2)    # helper (intra) + movable (to unlisted demo2)
             self.assertEqual(d["js_exports_removed"], 2)
 
     def test_stats_frontend_csv(self):
@@ -86,6 +86,37 @@ class OrchestratorTest(unittest.TestCase):
                 header = next(csv.reader(fh))
         self.assertEqual(header[:24], ["module"] + compare.STAT_KEYS[:23])
         self.assertEqual(header[1:], compare.STAT_KEYS)
+
+    def test_no_output_prints_summary_and_writes_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = os.getcwd()
+            os.chdir(tmp)
+            try:
+                _, out, err = quiet(migration_stats.main, ["--old", OLD, "--new", NEW, "--modules", "demo"])
+                self.assertEqual(os.listdir(tmp), [])
+            finally:
+                os.chdir(cwd)
+        self.assertIn("Templates", out)
+        self.assertIn("Indexing", err)
+
+    def test_format_csv_only_and_json_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run(tmp, "-f", "csv")
+            self.assertEqual(sorted(os.listdir(tmp)), ["stats_by_model.csv", "stats_by_module.csv",
+                                                       "stats_detail.csv", "stats_frontend.csv"])
+        with tempfile.TemporaryDirectory() as tmp:
+            run(tmp, "-f", "json")
+            self.assertEqual(sorted(os.listdir(tmp)), ["diff", "new", "old", "stats.json"])
+
+    def test_default_output_dir_when_no_value(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = os.getcwd()
+            os.chdir(tmp)
+            try:
+                quiet(migration_stats.main, ["--old", OLD, "--new", NEW, "--modules", "demo", "-o"])
+                self.assertTrue(os.path.isfile(os.path.join(tmp, "omodi-output", "stats.json")))
+            finally:
+                os.chdir(cwd)
 
     def test_module_missing_in_new_version(self):
         with tempfile.TemporaryDirectory() as tmp:

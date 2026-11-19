@@ -7,7 +7,7 @@ import unittest
 from omodi import compare, extract, js
 from tests.helpers import OLD, NEW, quiet
 
-needs_ts = unittest.skipUnless(js.HAS_TREE_SITTER, "tree-sitter non installé")
+needs_ts = unittest.skipUnless(js.HAS_TREE_SITTER, "tree-sitter not installed")
 
 
 def ext(path, module):
@@ -96,8 +96,8 @@ class ModuleDiffTest(unittest.TestCase):
         d = self.diff(line_counter=lambda module, key, o, n: (5, 3))
         t = total(d)
         self.assertEqual((t["js_files_removed"], t["js_files_added"], t["js_files_modified"]), (1, 2, 4))
-        self.assertEqual(t["js_lines_added"], 3 + 4 * 5)     # front2 (1) + helper (2) + 4 modifiés
-        self.assertEqual(t["js_lines_removed"], 2 + 4 * 3)   # legacy (2) + 4 modifiés
+        self.assertEqual(t["js_lines_added"], 3 + 4 * 5)     # front2 (1) + helper (2) + 4 modified
+        self.assertEqual(t["js_lines_removed"], 2 + 4 * 3)   # legacy (2) + 4 modified
         self.assertEqual([x["name"] for x in d["js_files"]["removed"]], ["static/src/js/legacy.js"])
 
     def test_js_lines_default_is_line_count_delta(self):

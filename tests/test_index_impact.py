@@ -4,7 +4,7 @@ from omodi import extract, js
 from omodi.extract import Index
 from tests.helpers import IMP_OLD, IMP_CUSTOM, quiet, tmp_addons
 
-needs_ts = unittest.skipUnless(js.HAS_TREE_SITTER, "tree-sitter non installé")
+needs_ts = unittest.skipUnless(js.HAS_TREE_SITTER, "tree-sitter not installed")
 
 
 def full(**kw):

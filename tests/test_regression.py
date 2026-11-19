@@ -1,4 +1,4 @@
-"""Les sorties des sections existantes doivent rester identiques (golden files)."""
+"""The outputs of the existing sections must stay identical (golden files)."""
 import contextlib
 import csv
 import io
@@ -15,7 +15,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 LEGACY = os.path.join(HERE, "fixtures", "legacy")
 GOLDEN = os.path.join(HERE, "fixtures", "golden")
 
-# Clés ajoutées par les nouvelles fonctionnalités : ignorées pour la comparaison
+# Keys added by the new features: ignored for the comparison
 IGNORED = {"paths", "templates"}
 
 
@@ -56,7 +56,7 @@ class RegressionTest(unittest.TestCase):
                 "--old", os.path.join(LEGACY, "old"), "--new", os.path.join(LEGACY, "new"),
                 "--modules", "sale_demo", "-o", tmp])
             self.assertEqual(_load(os.path.join(tmp, "stats.json")), _load(os.path.join(GOLDEN, "stats.json")))
-            # Les nouvelles colonnes s'ajoutent à droite : les colonnes existantes restent un préfixe identique
+            # The new columns are appended on the right: the existing columns remain an identical prefix
             with open(os.path.join(tmp, "stats_by_module.csv"), encoding="utf-8", newline="") as a, \
                     open(os.path.join(GOLDEN, "stats_by_module.csv"), encoding="utf-8", newline="") as b:
                 fresh, golden = list(csv.reader(a)), list(csv.reader(b))

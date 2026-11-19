@@ -1,45 +1,45 @@
 #!/usr/bin/env python3
 """
-omodi extract — extrait la définition de modèles et de modules Odoo.
+omodi extract — extracts the definition of Odoo models and modules.
 
-Deux formats de sortie :
-  odoo-model-extract/1  (-m MODEL)   : ce que chaque module apporte à un modèle
-  odoo-module-extract/1 (--module M) : ce qui ne dépend d'aucun modèle (templates, OWL, JS, assets)
+Two output formats:
+  odoo-model-extract/1  (-m MODEL)   : what each module contributes to a model
+  odoo-module-extract/1 (--module M) : what depends on no model (templates, OWL, JS, assets)
 
-Format modèle — pour un modèle donné (ex. sale.order), tous les modules des chemins d'addons, section par section :
-  - attributes  : attributs de classe _xxx (_name, _inherit, _order, _rec_name...)
-  - fields      : champs fields.Xxx(...) -> type + arguments
-  - methods     : méthodes -> signature + décorateurs
+Model format — for a given model (e.g. sale.order), all the modules of the addons paths, section by section:
+  - attributes  : class attributes _xxx (_name, _inherit, _order, _rec_name...)
+  - fields      : fields fields.Xxx(...) -> type + arguments
+  - methods     : methods -> signature + decorators
   - constraints : models.Constraint / models.Index / models.UniqueIndex
-  - views       : ir.ui.view liées au modèle (y compris vues héritées sans <field name="model">)
-  - templates   : templates QWeb des rapports (ir.actions.report / <report>) du modèle et templates
-                  qui en héritent (chaîne inherit_id) ; clé = xml_id complet
+  - views       : ir.ui.view related to the model (including inherited views without <field name="model">)
+  - templates   : QWeb templates of the model's reports (ir.actions.report / <report>) and templates
+                  inheriting from them (inherit_id chain); key = full xml_id
 
-Format module — un JSON par module, sections :
-  - qweb_templates : templates QWeb serveur (hors static/) non rattachés à un rapport de modèle :
-                     {inherit_id, primary, mode, priority, arch_hash, nodes, calls (t-call triés), loc}
-  - owl_templates  : templates OWL (static/src/**/*.xml), clé = t-name, ou "t-inherit|chemin" sans t-name :
+Module format — one JSON per module, sections:
+  - qweb_templates : server QWeb templates (outside static/) not attached to a model report:
+                     {inherit_id, primary, mode, priority, arch_hash, nodes, calls (sorted t-call), loc}
+  - owl_templates  : templates OWL (static/src/**/*.xml), key = t-name, or "t-inherit|path" without t-name:
                      {t_inherit, t_inherit_mode, arch_hash, nodes, loc}
   - js_files       : static/src/**/*.js -> {sha1, lines, import_path, loc}   (stdlib)
-  - js_exports     : clé "<chemin_import>::<nom>" -> {kind: class|function|const|reexport, loc}
-  - js_classes     : clé "<chemin_import>::<Classe>" -> {extends, methods {nom: params}, static
+  - js_exports     : key "<import_path>::<name>" -> {kind: class|function|const|reexport, loc}
+  - js_classes     : key "<import_path>::<Class>" -> {extends, methods {name: params}, static
                      {template, props, components}, loc}
-  - js_registries  : clé "<a/b>::<clé>" (registry.category("a").category("b").add) -> {value (<= 200 car.), loc}
-  - js_patches     : clé "<chemin_import>::<cible>" (patch(cible, {...})) -> {methods, properties, loc}
-  - assets         : clé `assets` du __manifest__.py : {bundle: [entrées]}
-  Exclus : static/tests, static/lib, static/src/**/tests. Le chemin d'import est @<module>/<chemin sous
-  static/src sans .js ni /index> (alias `@odoo-module alias=...` respecté ; `@odoo-module ignore` exclut le fichier).
-  js_exports / js_classes / js_registries / js_patches demandent tree-sitter (optionnel, voir js.py) ;
-  sans lui, un warning est affiché et ces sections restent vides (js_files reste rempli).
+  - js_registries  : key "<a/b>::<key>" (registry.category("a").category("b").add) -> {value (<= 200 chars), loc}
+  - js_patches     : key "<import_path>::<target>" (patch(target, {...})) -> {methods, properties, loc}
+  - assets         : `assets` key of __manifest__.py: {bundle: [entries]}
+  Excluded: static/tests, static/lib, static/src/**/tests. The import path is @<module>/<path under
+  static/src without .js or /index> (`@odoo-module alias=...` alias honored; `@odoo-module ignore` excludes the file).
+  js_exports / js_classes / js_registries / js_patches require tree-sitter (optional, see js.py);
+  without it, a warning is shown and these sections stay empty (js_files is still filled).
 
-Usage :
+Usage:
   omodi extract ODOO/addons ODOO/odoo/addons ENTERPRISE -m sale.order -o sale.order.json
-  omodi extract ODOO/addons -m sale.order -m res.partner -o extracts/   # un JSON par modèle
+  omodi extract ODOO/addons -m sale.order -m res.partner -o extracts/   # one JSON per model
   omodi extract ODOO/addons --module sale --module web -o extracts/     # extracts/modules/<module>.json
-  omodi extract ODOO/addons --list-models sale stock                   # modèles touchés par ces modules
-  omodi extract ...                                                            # même chose via le CLI installé
+  omodi extract ODOO/addons --list-models sale stock                   # models touched by these modules
+  omodi extract ...                                                            # same thing through the installed CLI
 
-Format de sortie (odoo-model-extract/1) :
+Output format (odoo-model-extract/1) :
 {
   "format": "odoo-model-extract/1",
   "model": "sale.order",
@@ -57,12 +57,12 @@ Format de sortie (odoo-model-extract/1) :
     }
   }
 }
-Format de sortie (odoo-module-extract/1) :
+Output format (odoo-module-extract/1) :
 {"format": "odoo-module-extract/1", "module": "web", "label": "20.0", "paths": [...],
  "qweb_templates": {...}, "owl_templates": {...}, "js_files": {...}, "js_exports": {...}, "js_classes": {...},
  "js_registries": {...}, "js_patches": {...}, "assets": {"web.assets_backend": ["web/static/src/**/*", ...]}}
 
-Stdlib uniquement, Python >= 3.9 (tree-sitter et tree-sitter-javascript optionnels pour le JS structurel).
+Stdlib only, Python >= 3.9 (tree-sitter and tree-sitter-javascript optional for structural JS).
 """
 from __future__ import annotations
 
@@ -85,16 +85,16 @@ CONSTRAINT_TYPES = {"Constraint", "Index", "UniqueIndex"}
 MODULE_FORMAT = "odoo-module-extract/1"
 MODULE_SECTIONS = ("qweb_templates", "owl_templates", "js_files", "js_exports", "js_classes",
                    "js_registries", "js_patches", "assets")
-# Sous static/src, ces dossiers ne sont pas analysés (static/tests et static/lib ne sont jamais parcourus)
+# Under static/src these folders are not analyzed (static/tests and static/lib are never walked)
 STATIC_SKIP_DIRS = {"tests", "lib", "node_modules"}
 SECTIONS = ("attributes", "fields", "methods", "constraints", "views", "templates")
 
 
 # --------------------------------------------------------------------------
-# Découverte
+# Discovery
 # --------------------------------------------------------------------------
 def find_modules(addons_paths):
-    """{nom_module: chemin} pour chaque dossier contenant un __manifest__.py."""
+    """{module_name: path} for each folder containing a __manifest__.py."""
     modules = {}
     for root in addons_paths:
         for dirpath, dirnames, filenames in os.walk(root):
@@ -102,7 +102,7 @@ def find_modules(addons_paths):
             if "__manifest__.py" in filenames:
                 name = os.path.basename(dirpath)
                 if name in modules:
-                    print(f"[warn] module {name} présent deux fois, on garde {modules[name]}",
+                    print(f"[warn] module {name} found twice, keeping {modules[name]}",
                           file=sys.stderr)
                 else:
                     modules[name] = dirpath
@@ -119,7 +119,7 @@ def _iter_files(module_path, ext):
 
 
 def static_files(module_path):
-    """Yield (chemin_absolu, chemin_relatif_à_static/src) pour static/src/**, hors tests/lib."""
+    """Yield (absolute_path, path_relative_to_static/src) for static/src/**, excluding tests/lib."""
     base = os.path.join(module_path, "static", "src")
     for dirpath, dirnames, filenames in os.walk(base):
         dirnames[:] = sorted(d for d in dirnames if d not in STATIC_SKIP_DIRS and not d.startswith("."))
@@ -165,7 +165,7 @@ def _class_model(cls):
 
 
 def _call_kind(value):
-    """('field', type) pour fields.X(...), ('constraint', type) pour models.Constraint(...)."""
+    """('field', type) for fields.X(...), ('constraint', type) for models.Constraint(...)."""
     if isinstance(value, ast.Call) and isinstance(value.func, ast.Attribute) \
             and isinstance(value.func.value, ast.Name):
         mod, attr = value.func.value.id, value.func.attr
@@ -182,7 +182,7 @@ def parse_python(path, module_path):
         with open(path, encoding="utf-8") as fh:
             tree = ast.parse(fh.read(), filename=path)
     except (SyntaxError, UnicodeDecodeError) as e:
-        print(f"[warn] parse impossible {path}: {e}", file=sys.stderr)
+        print(f"[warn] cannot parse {path}: {e}", file=sys.stderr)
         return
     for cls in ast.walk(tree):
         if not isinstance(cls, ast.ClassDef):
@@ -255,16 +255,16 @@ def _arch(elements, text):
 
 
 def parse_xml(path):
-    """Racine XML du fichier, ou None (avec un warning) si invalide."""
+    """XML root of the file, or None (with a warning) if invalid."""
     try:
         return ET.parse(path).getroot()
     except (ET.ParseError, UnicodeDecodeError) as e:
-        print(f"[warn] XML invalide {path}: {e}", file=sys.stderr)
+        print(f"[warn] invalid XML {path}: {e}", file=sys.stderr)
         return None
 
 
 def parse_views(path, module, module_path, root=None):
-    """Yield (xml_id, info) pour chaque ir.ui.view (les templates QWeb sans modèle sont ignorés)."""
+    """Yield (xml_id, info) for each ir.ui.view (QWeb templates without a model are ignored)."""
     root = root if root is not None else parse_xml(path)
     if root is None:
         return
@@ -301,12 +301,12 @@ def _ref_of(field, module):
 
 
 def _calls(elements):
-    """Cibles t-call triées (sans doublon) de ces éléments et de leurs descendants."""
+    """Sorted t-call targets (no duplicates) of these elements and their descendants."""
     return sorted({e.get("t-call") for el in elements for e in el.iter() if e.get("t-call")})
 
 
 def parse_qweb(path, module, module_path, root=None):
-    """Yield (xml_id, info) pour les templates QWeb serveur : <template> et ir.ui.view de type qweb.
+    """Yield (xml_id, info) for server QWeb templates: <template> and ir.ui.view of type qweb.
 
     info = {inherit_id, primary, mode, priority, arch_hash, nodes, calls, loc}
     """
@@ -339,7 +339,7 @@ def parse_qweb(path, module, module_path, root=None):
 
 
 def parse_reports(path, module, root=None):
-    """Yield (report_name complet, modèle) pour les ir.actions.report (records et balises <report>)."""
+    """Yield (full report_name, model) for ir.actions.report (records and <report> tags)."""
     root = root if root is not None else parse_xml(path)
     if root is None:
         return
@@ -355,9 +355,9 @@ def parse_reports(path, module, root=None):
 
 
 def parse_owl(path, module, module_path, root=None):
-    """Yield (clé, info) pour les templates OWL d'un fichier static/src/**/*.xml.
+    """Yield (key, info) for the OWL templates of a static/src/**/*.xml.
 
-    Clé : t-name, ou "t-inherit|chemin relatif au module" si le template n'a pas de t-name.
+    Key: t-name, or "t-inherit|path relative to the module" if the template has no t-name.
     info = {t_inherit, t_inherit_mode, arch_hash, nodes, loc}
     """
     root = root if root is not None else parse_xml(path)
@@ -378,7 +378,7 @@ def parse_owl(path, module, module_path, root=None):
 
 
 def read_depends(manifest_path):
-    """Clé `depends` du __manifest__.py (liste de noms) ; [] si absente ou illisible (warning)."""
+    """`depends` key of __manifest__.py (list of names); [] if missing or unreadable (warning)."""
     try:
         with open(manifest_path, encoding="utf-8") as fh:
             tree = ast.parse(fh.read(), filename=manifest_path)
@@ -387,7 +387,7 @@ def read_depends(manifest_path):
                      if isinstance(k, ast.Constant) and k.value == "depends"), None)
         return [str(d) for d in ast.literal_eval(node)] if node is not None else []
     except (SyntaxError, ValueError, TypeError, UnicodeDecodeError, OSError) as e:
-        print(f"[warn] depends illisibles dans {manifest_path}: {e}", file=sys.stderr)
+        print(f"[warn] unreadable depends in {manifest_path}: {e}", file=sys.stderr)
         return []
 
 
@@ -399,9 +399,9 @@ _XMLID = re.compile(r"^[\w.\-]+$")
 
 
 def xml_refs_of(root, module, path, module_path):
-    """Références à des XML ids d'autres modules dans un fichier XML (ref, inherit_id, groups, %(x.y)d...).
+    """References to other modules' XML ids in an XML file (ref, inherit_id, groups, %(x.y)d...).
 
-    Les ids sans préfixe ou préfixés par le module lui-même sont ignorés. Pas de numéro de ligne (ElementTree).
+    Ids without prefix or prefixed by the module itself are ignored. No line number (ElementTree).
     """
     loc, out = _loc(path, module_path), []
 
@@ -428,7 +428,7 @@ def xml_refs_of(root, module, path, module_path):
 
 
 def py_refs_of(path, module, module_path):
-    """`env.ref("x.y")` à littéral chaîne dans un fichier Python -> [{xml_id, kind: env.ref, loc}]."""
+    """`env.ref("x.y")` with a string literal in a Python file -> [{xml_id, kind: env.ref, loc}]."""
     try:
         with open(path, encoding="utf-8") as fh:
             tree = ast.parse(fh.read(), filename=path)
@@ -450,7 +450,7 @@ def py_refs_of(path, module, module_path):
 
 
 def parse_assets(manifest_path):
-    """Clé `assets` du __manifest__.py : {bundle: [entrées]} (tuples aplatis en "op arg arg")."""
+    """`assets` key of __manifest__.py: {bundle: [entries]} (tuples flattened to "op arg arg")."""
     try:
         with open(manifest_path, encoding="utf-8") as fh:
             tree = ast.parse(fh.read(), filename=manifest_path)
@@ -463,34 +463,35 @@ def parse_assets(manifest_path):
         return {str(bundle): [e if isinstance(e, str) else " ".join(str(x) for x in e) for e in entries]
                 for bundle, entries in raw.items()}
     except (SyntaxError, ValueError, TypeError, AttributeError, UnicodeDecodeError, OSError) as e:
-        print(f"[warn] assets illisibles dans {manifest_path}: {e}", file=sys.stderr)
+        print(f"[warn] unreadable assets in {manifest_path}: {e}", file=sys.stderr)
         return {}
 
 
 # --------------------------------------------------------------------------
-# Index : un seul parcours, puis extraction par modèle
+# Index: a single walk, then extraction per model
 # --------------------------------------------------------------------------
 class Index:
-    def __init__(self, addons_paths, label=None, only=None, focus=None, scan=True):
-        """only : modules à scanner (None = tous). focus : modules dont on collecte aussi les références
-        (XML ids, env.ref, imports JS) pour l'analyse d'impact. scan=False : découverte + depends seulement,
-        puis appeler .scan(only, focus)."""
+    def __init__(self, addons_paths, label=None, only=None, focus=None, scan=True, progress=None):
+        """only: modules to scan (None = all). focus: modules whose references are also collected
+        (XML ids, env.ref, JS imports) for the impact analysis. scan=False: discovery + depends only,
+        then call .scan(only, focus)."""
         self.paths = list(addons_paths)
         self.label = label
+        self.progress = progress   # optional callable(factory): factory(total) -> update(done, name)
         self.modules = find_modules(addons_paths)
         self.depends = {m: read_depends(os.path.join(p, "__manifest__.py")) for m, p in self.modules.items()}
-        self.xml_ids = {}                        # id complet -> module (modules scannés)
-        self.xml_refs = defaultdict(list)        # focus : références XML vers d'autres modules
-        self.py_refs = defaultdict(list)         # focus : env.ref("x.y")
-        self.js_imports = defaultdict(list)      # focus : imports JS (tree-sitter)
+        self.xml_ids = {}                        # full id -> module (scanned modules)
+        self.xml_refs = defaultdict(list)        # focus: XML references to other modules
+        self.py_refs = defaultdict(list)         # focus: env.ref("x.y")
+        self.js_imports = defaultdict(list)      # focus: JS imports (tree-sitter)
         self.only, self.focus = None, set()
         # data[model][module][section][name] = {...}
         self.data = defaultdict(lambda: defaultdict(lambda: {s: {} for s in SECTIONS}))
         self.module_models = defaultdict(set)
-        self.mod = defaultdict(lambda: {s: {} for s in MODULE_SECTIONS})   # extraction par module
-        self.qweb = {}              # xml_id -> info (+ "module"), tous les templates QWeb serveur
-        self.js_paths = {}          # (module, "static/src/...js") -> chemin absolu (lignes via difflib)
-        self.qweb_attached = set()  # ceux rattachés à un modèle via un rapport
+        self.mod = defaultdict(lambda: {s: {} for s in MODULE_SECTIONS})   # per-module extraction
+        self.qweb = {}              # xml_id -> info (+ "module"), all server QWeb templates
+        self.js_paths = {}          # (module, "static/src/...js") -> absolute path (lines via difflib)
+        self.qweb_attached = set()  # those attached to a model through a report
         if scan:
             self.scan(only, focus)
 
@@ -502,14 +503,16 @@ class Index:
     def _scan(self):
         all_views = {}
         reports = []   # (report_name, model)
-        for module, mpath in sorted(self.modules.items()):
-            if self.only is not None and module not in self.only:
-                continue
+        todo = [(m, p) for m, p in sorted(self.modules.items()) if self.only is None or m in self.only]
+        update = self.progress(len(todo)) if self.progress else None
+        for done, (module, mpath) in enumerate(todo):
+            if update:
+                update(done, module)
             for py in _iter_files(mpath, ".py"):
                 for model, section, name, data in parse_python(py, mpath):
                     bucket = self.data[model][module][section]
                     if section == "attributes" and name == "_inherit" and name in bucket:
-                        # plusieurs classes du même module : union des _inherit
+                        # several classes in the same module: union of the _inherit
                         bucket[name]["value"] = bucket[name]["value"] + " | " + data["value"]
                     elif section == "fields" and name in bucket:
                         bucket[name]["attrs"].update(data["attrs"])
@@ -537,7 +540,9 @@ class Index:
                     self.xml_refs[module].extend(xml_refs_of(root, module, xml, mpath))
             self._scan_static(module, mpath)
             self.mod[module]["assets"] = parse_assets(os.path.join(mpath, "__manifest__.py"))
-        # Résolution du modèle des vues héritées qui ne le précisent pas
+        if update:
+            update(len(todo))
+        # Resolve the model of inherited views that do not specify it
         for xid, info in all_views.items():
             model, seen, cur = info["model"], set(), info
             while not model and cur and cur.get("inherit_id") and cur["inherit_id"] not in seen:
@@ -553,7 +558,7 @@ class Index:
         self._attach_report_templates(reports)
 
     def _scan_static(self, module, mpath):
-        """static/src : templates OWL (.xml) et fichiers JS (lus une seule fois)."""
+        """static/src : OWL templates (.xml) and JS files (read once)."""
         mod = self.mod[module]
         for full, rel in static_files(mpath):
             if rel.endswith(".xml"):
@@ -569,14 +574,14 @@ class Index:
             with open(full, "rb") as fh:
                 data = fh.read()
         except OSError as e:
-            print(f"[warn] lecture impossible {full}: {e}", file=sys.stderr)
+            print(f"[warn] cannot read {full}: {e}", file=sys.stderr)
             return
         mod, loc = self.mod[module], _loc(full, mpath)
         ip = js.import_path(module, rel, data[:1000].decode("utf-8", "replace"))
         key = f"static/src/{rel}"
         mod["js_files"][key] = {**js.file_info(data), "import_path": ip, "loc": loc}
         self.js_paths[(module, key)] = full
-        if ip is None:   # `@odoo-module ignore` : pas un module, rien de structurel
+        if ip is None:   # `@odoo-module ignore`: not a module, nothing structural
             return
         focus = module in self.focus
         res = js.analyze(data, ip, loc, with_imports=focus)
@@ -590,13 +595,13 @@ class Index:
             mod[section].update(res[k])
 
     def _attach_report_templates(self, reports):
-        """Rattache aux modèles les templates de rapports et ceux qui en héritent (chaîne inherit_id)."""
-        roots = defaultdict(set)   # xml_id du template principal -> modèles
+        """Attaches report templates and those inheriting from them (inherit_id chain) to models."""
+        roots = defaultdict(set)   # xml_id of the main template -> models
         for rname, model in reports:
             if rname in self.qweb:
                 roots[rname].add(model)
             else:
-                print(f"[warn] rapport {rname} ({model}) : template introuvable", file=sys.stderr)
+                print(f"[warn] report {rname} ({model}): template not found", file=sys.stderr)
         for xid, info in self.qweb.items():
             models, cur, seen = set(), xid, set()
             while cur and cur not in seen:
@@ -620,7 +625,7 @@ class Index:
         return out
 
     def extract_module(self, module):
-        """Extraction odoo-module-extract/1 d'un module, ou None si le module est inconnu."""
+        """odoo-module-extract/1 extraction of a module, or None if the module is unknown."""
         if module not in self.modules:
             return None
         sections = self.mod[module]
@@ -651,21 +656,21 @@ def model_filename(model):
 
 
 def module_filename(module):
-    """Chemin relatif (dans un dossier de sortie) de l'extraction d'un module."""
+    """Relative path (inside an output folder) of a module's extraction."""
     return os.path.join("modules", f"{module}.json")
 
 
 def main(argv=None):
-    p = argparse.ArgumentParser(description="Extrait la définition de modèles Odoo")
-    p.add_argument("paths", nargs="+", help="chemins d'addons (community, enterprise, custom...)")
-    p.add_argument("-m", "--model", action="append", default=[], help="modèle à extraire (répétable)")
+    p = argparse.ArgumentParser(prog="omodi extract", description="Extract the definition of Odoo models")
+    p.add_argument("paths", nargs="+", help="addons paths (community, enterprise, custom...)")
+    p.add_argument("-m", "--model", action="append", default=[], help="model to extract (repeatable)")
     p.add_argument("--module", action="append", default=[],
-                   help="module dont on extrait templates QWeb/OWL, JS et assets (répétable)")
-    p.add_argument("-o", "--output", help="fichier .json (une seule cible) ou dossier "
-                                          "(modules dans OUTPUT/modules/)")
-    p.add_argument("--label", help="étiquette de version stockée dans la sortie (ex. 20.0)")
+                   help="module whose QWeb/OWL templates, JS and assets are extracted (repeatable)")
+    p.add_argument("-o", "--output", help="output .json file (single target) or folder "
+                                          "(modules in OUTPUT/modules/)")
+    p.add_argument("--label", help="version label stored in the output (e.g. 20.0)")
     p.add_argument("--list-models", nargs="+", metavar="MODULE",
-                   help="affiche les modèles touchés par ces modules et quitte")
+                   help="print the models touched by these modules and exit")
     a = p.parse_args(argv)
 
     idx = Index(a.paths, a.label)
@@ -674,27 +679,27 @@ def main(argv=None):
             print(m)
         return
     if not (a.model or a.module) or not a.output:
-        p.error("-m/--model ou --module, et -o/--output sont requis (sauf avec --list-models)")
+        p.error("-m/--model or --module, and -o/--output are required (except with --list-models)")
 
     single = len(a.model) + len(a.module) == 1 and a.output.endswith(".json")
     for model in a.model:
         ext = idx.extract(model)
         if not ext["modules"]:
-            print(f"[warn] modèle {model} introuvable", file=sys.stderr)
+            print(f"[warn] model {model} not found", file=sys.stderr)
         out = a.output if single else os.path.join(a.output, model_filename(model))
         write_json(ext, out)
         n = {s: sum(len(v[s]) for v in ext["modules"].values()) for s in SECTIONS}
-        print(f"{model}: {len(ext['modules'])} modules, {n['fields']} champs, "
-              f"{n['methods']} méthodes, {n['views']} vues -> {out}")
+        print(f"{model}: {len(ext['modules'])} modules, {n['fields']} fields, "
+              f"{n['methods']} methods, {n['views']} views -> {out}")
     for module in a.module:
         ext = idx.extract_module(module)
         if ext is None:
-            print(f"[warn] module {module} introuvable", file=sys.stderr)
+            print(f"[warn] module {module} not found", file=sys.stderr)
             continue
         out = a.output if single else os.path.join(a.output, module_filename(module))
         write_json(ext, out)
         print(f"{module}: {len(ext['qweb_templates'])} templates QWeb, {len(ext['owl_templates'])} templates OWL, "
-              f"{len(ext['js_files'])} fichiers JS, {len(ext['js_exports'])} exports, "
+              f"{len(ext['js_files'])} JS files, {len(ext['js_exports'])} exports, "
               f"{len(ext['js_classes'])} classes -> {out}")
 
 

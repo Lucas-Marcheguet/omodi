@@ -59,14 +59,26 @@ omodi {extract,compare,stats,impact} [options...]
 
 Run `omodi <command> --help` for the options of each command.
 
+Running `omodi` alone prints the help.
+
+Output (`stats` and `impact`):
+
+- Without `-o`, the report is printed on the console only (Markdown for `impact`, summary for `stats`); nothing is written.
+- `-o [DIR]` also writes files to `DIR` (`./omodi-output` if no value is given).
+- `-f {json,csv,all}` picks the file format written with `-o` (default `all`). The Markdown report is never written to a file.
+- Progress is shown on stderr; `-q` disables it.
+
 Examples:
 
 ```bash
 omodi stats --old ~/odoo17/addons --new ~/odoo18/addons \
-    --modules-file modules.txt -o out/
+    --modules-file modules.txt                 # console only
+
+omodi stats --old ~/odoo17/addons --new ~/odoo18/addons \
+    --modules-file modules.txt -o out/ -f csv
 
 omodi impact --old ~/odoo17/addons --new ~/odoo18/addons \
-    --custom ~/custom --modules-file modules.txt -o out/
+    --custom ~/custom --modules-file modules.txt -o   # also writes ./omodi-output/impact.{json,csv}
 ```
 
 ## License

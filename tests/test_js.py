@@ -5,7 +5,7 @@ from omodi import js
 from omodi.extract import Index
 from tests.helpers import OLD, quiet, tmp_addons
 
-needs_ts = unittest.skipUnless(js.HAS_TREE_SITTER, "tree-sitter non installé")
+needs_ts = unittest.skipUnless(js.HAS_TREE_SITTER, "tree-sitter not installed")
 P = "@m/x"
 
 

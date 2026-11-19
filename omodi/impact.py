@@ -1,36 +1,39 @@
 """
-omodi impact — ce à quoi faire attention pour monter de version un ou plusieurs modules custom.
+omodi impact — what to watch out for when upgrading one or more custom modules.
 
-Pour chaque module custom :
-  1. fermeture de ses dépendances (`depends` des manifests de OLD) ; les modules custom sont traversés mais
-     pas comparés, les autres forment l'« amont » ;
-  2. diff de l'amont entre OLD et NEW (extract + compare : modèles, templates QWeb / OWL, JS, assets) ;
-  3. croisement avec ce que le module surcharge, hérite, référence ou importe -> constats.
-OLD n'est scanné que sur le module custom et sa fermeture ; NEW est scanné en entier (pour voir qu'un élément
-a été déplacé vers un module hors de la fermeture : « ajouter la dépendance »).
+For each custom module:
+  1. closure of its dependencies (`depends` of the OLD manifests); custom modules are traversed but
+     not compared, the others form the "upstream";
+  2. diff of the upstream between OLD and NEW (extract + compare: models, QWeb / OWL templates, JS, assets);
+  3. cross-check with what the module overrides, inherits, references or imports -> findings.
+OLD is scanned only on the custom module and its closure; NEW is scanned entirely (to see that an item
+was moved to a module outside the closure: "add the dependency").
 
-Usage :
+Usage:
   omodi impact --old ODOO-20/addons ODOO-20/odoo/addons ENTERPRISE-20 \\
                 --new ODOO-21/addons ODOO-21/odoo/addons ENTERPRISE-21 \\
-                --custom MES_ADDONS --modules mon_module autre_module -o impact/
-  (--modules-file modules.txt : un module par ligne ou séparés par des virgules, # = commentaire)
-Un module custom est cherché d'abord dans --custom, puis dans --old ; une copie dans --new est ignorée.
+                --custom MY_ADDONS --modules my_module other_module
+  (--modules-file modules.txt: one module per line or comma-separated, # = comment)
+A custom module is looked up first in --custom, then in --old; a copy in --new is ignored.
 
-Sorties : OUT/impact.json (format odoo-impact/1) et OUT/impact.md (rapport lisible, un titre par module).
+Output: the Markdown report (one heading per module) is always printed on the console, never written to a file.
+With -o [DIR] (default ./omodi-output), -f {json,csv,all} also writes OUT/impact.json (format odoo-impact/1)
+and/or OUT/impact.csv (one row per finding).
 
-Niveaux : breaking (cible supprimée / déplacée / renommée, dépendance absente de NEW),
-          review (signature, arguments, arch ou champs statiques modifiés ; conflit de nom avec un nouvel
-          élément amont ; mention textuelle d'un nom supprimé), info (le reste, ex. dépendance introuvable).
-Règles (champ `rule`) : depends-*, model-removed, field-* / method-* (removed, moved, moved-out-of-closure,
+Levels: breaking (target removed / moved / renamed, dependency missing from NEW),
+        review (signature, arguments, arch or static fields modified; name clash with a new upstream
+        item; textual mention of a removed name), info (the rest, e.g. unresolved dependency).
+Rules (`rule` field): depends-*, model-removed, field-* / method-* (removed, moved, moved-out-of-closure,
 modified, clash), view-* / template-* (parent-removed, parent-modified, field-removed, call-removed,
 xpath-target-removed), owl-*, js-import-*, js-class-modified, js-method-*, js-patch-method-*, registry-*,
 asset-*, xmlid-removed / xmlid-moved (ref, inherit_id, groups, %(x.y)d, env.ref), mention-removed-name.
-Les constats `confidence: heuristic` reposent sur une heuristique (xpath, bundles, mentions textuelles).
-Limites : voir LIMITS (reprises dans le rapport). Stdlib uniquement ; tree-sitter optionnel (règles JS).
+Findings with `confidence: heuristic` rely on a heuristic (xpath, bundles, textual mentions).
+Limits: see LIMITS (repeated in the report). Stdlib only; tree-sitter optional (JS rules).
 """
 from __future__ import annotations
 
 import argparse
+import csv
 import os
 import re
 import sys
@@ -41,29 +44,30 @@ from . import compare as cmp
 from . import extract as ex
 from . import js
 from .migration_stats import read_modules
+from .output import Progress, add_output_args, check_output_args, wants
 
 LEVELS = ("breaking", "review", "info")
 
 
 class ImpactError(Exception):
-    """Erreur d'usage (module introuvable...) : affichée sans traceback par la CLI."""
+    """Usage error (module not found...): displayed by the CLI without a traceback."""
 
 
 def finding(level, category, rule, message, module, loc, name=None, upstream=None, confidence="certain"):
-    """Un constat : niveau, catégorie, règle, message, côté custom (module, loc, nom) et côté amont."""
+    """A finding: level, category, rule, message, custom side (module, loc, name) and upstream side."""
     return {"level": level, "category": category, "rule": rule, "message": message,
             "custom": {"module": module, "loc": loc, "name": name},
             "upstream": upstream or {}, "confidence": confidence}
 
 
 # --------------------------------------------------------------------------
-# Dépendances
+# Dependencies
 # --------------------------------------------------------------------------
 def closure(index, roots):
-    """Fermeture transitive de `depends` depuis `roots`.
+    """Transitive closure of `depends` from `roots`.
 
-    Retourne (membres, non_résolus) : membres = modules trouvés dans l'index (racines comprises) ;
-    non_résolus = [{"module", "required_by"}] pour les noms absents de l'index.
+    Returns (members, unresolved): members = modules found in the index (roots included);
+    unresolved = [{"module", "required_by"}] for the names missing from the index.
     """
     members, unresolved, seen = [], [], set()
     queue = [(r, None) for r in roots]
@@ -86,23 +90,23 @@ def _under(path, folders):
 
 
 class Context:
-    """État partagé par toutes les règles : deux index, périmètres amont, diffs par modèle / par module."""
+    """State shared by all the rules: two indexes, upstream scopes, per-model / per-module diffs."""
 
     def __init__(self):
         self.old = self.new = None
-        self.modules = []            # modules custom demandés
-        self.custom_set = set()      # demandés + modules trouvés dans --custom
-        self.closure_old = {}        # module demandé -> membres de la fermeture (OLD)
-        self.unresolved = {}         # module demandé -> dépendances introuvables
-        self.upstream_old = {}       # module demandé -> modules amont de sa fermeture (OLD)
-        self.closure_new = {}        # module demandé -> fermeture des mêmes modules dans NEW
+        self.modules = []            # requested custom modules
+        self.custom_set = set()      # requested + modules found in --custom
+        self.closure_old = {}        # requested module -> closure members (OLD)
+        self.unresolved = {}         # requested module -> unresolved dependencies
+        self.upstream_old = {}       # requested module -> upstream modules of its closure (OLD)
+        self.closure_new = {}        # requested module -> closure of the same modules in NEW
         self.upstream_union = set()
-        self.module_diffs = {}       # module amont -> diff odoo-module-diff/1
+        self.module_diffs = {}       # upstream module -> odoo-module-diff/1 diff
         self._model_diffs = {}
         self._local_ids = None
 
     def model_diff(self, model):
-        """{"diff", "old", "new"} pour un modèle : OLD restreint à l'amont, NEW complet (déplacements)."""
+        """{"diff", "old", "new"} for a model: OLD restricted to the upstream, NEW complete (moves)."""
         if model not in self._model_diffs:
             old_ext = self.old.extract(model)
             old_ext["modules"] = {m: v for m, v in old_ext["modules"].items() if m in self.upstream_union}
@@ -112,7 +116,7 @@ class Context:
         return self._model_diffs[model]
 
     def local_template_ids(self):
-        """{nom local: [xml ids]} des templates QWeb de NEW (pour suggérer un déplacement)."""
+        """{local name: [xml ids]} of the QWeb templates of NEW (to suggest a move)."""
         if self._local_ids is None:
             self._local_ids = {}
             for xid in self.new.qweb:
@@ -121,7 +125,7 @@ class Context:
 
 
 def _new_module_pool(old, new):
-    """Exports / classes des modules absents de OLD : destinations possibles d'un déplacement."""
+    """Exports / classes of the modules absent from OLD: possible destinations of a move."""
     pool = {"js_exports": [], "js_classes": []}
     for module in new.modules:
         if module in old.modules:
@@ -134,14 +138,14 @@ def _new_module_pool(old, new):
     return pool
 
 
-def build_context(old_paths, new_paths, custom_paths, modules, old_label=None, new_label=None):
-    """Indexe OLD (custom + fermeture amont seulement) et NEW (arbre entier), calcule les diffs amont."""
+def build_context(old_paths, new_paths, custom_paths, modules, old_label=None, new_label=None, progress=None):
+    """Indexes OLD (custom + upstream closure only) and NEW (whole tree), computes the upstream diffs."""
     ctx = Context()
     ctx.modules = list(modules)
     ctx.old = ex.Index(list(custom_paths) + list(old_paths), old_label, scan=False)
     unknown = [m for m in modules if m not in ctx.old.modules]
     if unknown:
-        raise ImpactError(f"module(s) introuvable(s) dans --custom et --old : {', '.join(unknown)}")
+        raise ImpactError(f"module(s) not found in --custom and --old: {', '.join(unknown)}")
     custom_dirs = [os.path.realpath(p) for p in custom_paths]
     ctx.custom_set = set(modules) | {m for m, p in ctx.old.modules.items() if _under(p, custom_dirs)}
 
@@ -152,18 +156,26 @@ def build_context(old_paths, new_paths, custom_paths, modules, old_label=None, n
         ctx.upstream_old[m] = {x for x in members if x not in ctx.custom_set}
         union.update(members)
     ctx.upstream_union = {x for x in union if x not in ctx.custom_set}
+    ctx.old.progress = (lambda n: progress.task(f"Indexing {old_label or 'old'}", n)) if progress else None
     ctx.old.scan(only=union, focus=modules)
 
     ctx.new = ex.Index(list(new_paths), new_label, scan=False)
+    ctx.new.progress = (lambda n: progress.task(f"Indexing {new_label or 'new'}", n)) if progress else None
     ctx.new.scan()
     for m in modules:
         roots = [x for x in ctx.upstream_old[m] if x in ctx.new.modules]
         ctx.closure_new[m] = set(closure(ctx.new, roots)[0])
 
-    for m in sorted(ctx.upstream_union):
+    upstream = sorted(ctx.upstream_union)
+    update = progress.task("Comparing upstream modules", len(upstream)) if progress else None
+    for done, m in enumerate(upstream):
+        if update:
+            update(done, m)
         old_m = ctx.old.extract_module(m)
         new_m = ctx.new.extract_module(m) or {"module": m, "label": new_label}
         ctx.module_diffs[m] = cmp.compare_modules(old_m, new_m)
+    if update:
+        update(len(upstream))
     cmp.resolve_cross_module_moves(ctx.module_diffs, _new_module_pool(ctx.old, ctx.new))
     return ctx
 
@@ -173,28 +185,28 @@ def dependency_findings(ctx, module):
     for dep in sorted(ctx.upstream_old[module]):
         if dep not in ctx.new.modules:
             out.append(finding("breaking", "depends", "depends-removed",
-                               f"la dépendance `{dep}` n'existe plus dans la nouvelle version "
-                               f"(module supprimé ou renommé)", module,
+                               f"the dependency `{dep}` no longer exists in the new version "
+                               f"(module removed or renamed)", module,
                                os.path.relpath(os.path.join(ctx.old.modules[module], "__manifest__.py"),
                                                os.path.dirname(ctx.old.modules[module])),
                                name=dep, upstream={"name": dep}))
     for u in ctx.unresolved[module]:
         out.append(finding("info", "depends", "depends-unresolved",
-                           f"la dépendance `{u['module']}` (requise par `{u['required_by']}`) est introuvable "
-                           f"dans --custom, --old et --new : analyse incomplète", module, None,
+                           f"the dependency `{u['module']}` (required by `{u['required_by']}`) cannot be found "
+                           f"in --custom, --old and --new: incomplete analysis", module, None,
                            name=u["module"], upstream={"name": u["module"]}))
     return out
 
 
 # --------------------------------------------------------------------------
-# Règles niveau modèle
+# Model-level rules
 # --------------------------------------------------------------------------
 def _boundary(token):
     return re.compile(r"(?<![\w-])" + re.escape(token) + r"(?![\w-])")
 
 
 def _xpath_tokens(nodes):
-    """Chaînes entre guillemets des expr xpath d'une liste de signatures de nœuds."""
+    """Quoted strings of the xpath exprs of a list of node signatures."""
     tokens = []
     for sig in nodes:
         if sig.startswith("xpath["):
@@ -203,7 +215,7 @@ def _xpath_tokens(nodes):
 
 
 def _removed_tokens(tokens, removed, added):
-    """Tokens présents dans un nœud retiré de l'arch parente et dans aucun nœud ajouté."""
+    """Tokens present in a node removed from the parent arch and in no added node."""
     out = []
     for t in tokens:
         rx = _boundary(t)
@@ -218,24 +230,24 @@ def _summary(section, changes):
         if "type" in changes:
             parts.append(f"type {changes['type']['old']} -> {changes['type']['new']}")
         if "attrs" in changes:
-            parts.append("arguments modifiés : " + ", ".join(changes["attrs"]))
+            parts.append("arguments changed: " + ", ".join(changes["attrs"]))
     else:
         if "signature" in changes:
             parts.append(f"signature ({changes['signature']['old']}) -> ({changes['signature']['new']})")
         if "decorators" in changes:
-            parts.append(f"décorateurs {changes['decorators']['old']} -> {changes['decorators']['new']}")
-    return "; ".join(parts) or "modifié"
+            parts.append(f"decorators {changes['decorators']['old']} -> {changes['decorators']['new']}")
+    return "; ".join(parts) or "modified"
 
 
 def _removed_names(md, section, up):
-    """Noms réellement supprimés (retirés d'un module amont et encore définis nulle part dans NEW)."""
+    """Really removed names (removed from an upstream module and no longer defined anywhere in NEW)."""
     still = {n for v in md["new"]["modules"].values() for n in v[section]}
     return {e["name"] for e in md["diff"][section]["removed"] if e["module"] in up and e["name"] not in still}
 
 
 def _item_findings(ctx, module, model, section, md, up, newc, out):
     cat = "field" if section == "fields" else "method"
-    label, e = ("champ", "") if cat == "field" else ("méthode", "e")   # accord des participes
+    label = "field" if cat == "field" else "method"
     sec = md["diff"][section]
     old_defs = {n for m, v in md["old"]["modules"].items() if m in up for n in v[section]}
     new_defs = {n for v in md["new"]["modules"].values() for n in v[section]}
@@ -247,26 +259,26 @@ def _item_findings(ctx, module, model, section, md, up, newc, out):
         added = [e for e in sec["added"] if e["name"] == name and e["module"] in newc]
         if removed and name not in new_defs:
             out.append(finding("breaking", cat, f"{cat}-removed",
-                               f"{label} `{name}` de `{model}` supprimé{e} en amont (module {removed[0]['module']}) : "
-                               f"la surcharge n'a plus de cible", module, loc, name,
+                               f"{label} `{name}` of `{model}` removed upstream (module {removed[0]['module']}): "
+                               f"the override no longer has a target", module, loc, name,
                                {"name": name, "model": model, "module": removed[0]["module"]}))
         elif moved:
             to = moved[0]["to"]
             inside = to in newc
             out.append(finding(
                 "review" if inside else "breaking", cat, f"{cat}-moved" if inside else f"{cat}-moved-out-of-closure",
-                f"{label} `{name}` de `{model}` déplacé{e} de `{moved[0]['from']}` vers `{to}`"
-                + ("" if inside else " : ajouter cette dépendance au manifest"), module, loc, name,
+                f"{label} `{name}` of `{model}` moved from `{moved[0]['from']}` to `{to}`"
+                + ("" if inside else ": add this dependency to the manifest"), module, loc, name,
                 {"name": name, "model": model, "from_module": moved[0]["from"], "to_module": to}))
         elif modified:
             out.append(finding("review", cat, f"{cat}-modified",
-                               f"{label} `{name}` de `{model}` modifié{e} en amont : "
+                               f"{label} `{name}` of `{model}` modified upstream: "
                                f"{_summary(section, modified[0]['changes'])}", module, loc, name,
                                {"name": name, "model": model, "module": modified[0]["module"]}))
         elif added and name not in old_defs:
             out.append(finding("review", cat, f"{cat}-clash",
-                               f"{label} `{name}` de `{model}` est maintenant aussi défini{e} en amont "
-                               f"(module {added[0]['module']}) : conflit possible", module, loc, name,
+                               f"{label} `{name}` of `{model}` is now also defined upstream "
+                               f"(module {added[0]['module']}): possible clash", module, loc, name,
                                {"name": name, "model": model, "module": added[0]["module"]}))
 
 
@@ -284,7 +296,7 @@ def _view_findings(ctx, module, model, md, up, out):
             if m and m.group(1) in removed_fields and m.group(1) not in seen:
                 seen.add(m.group(1))
                 out.append(finding("breaking", "view", "view-field-removed",
-                                   f"la vue `{xid}` utilise le champ `{m.group(1)}` de `{model}`, supprimé en amont",
+                                   f"the view `{xid}` uses the field `{m.group(1)}` of `{model}`, removed upstream",
                                    module, loc, xid, {"name": m.group(1), "model": model}))
         if not parent:
             continue
@@ -292,25 +304,25 @@ def _view_findings(ctx, module, model, md, up, out):
         changed = [e for e in vdiff["modified"] if e["name"] == parent and e["module"] in up]
         if gone:
             out.append(finding("breaking", "view", "view-parent-removed",
-                               f"la vue `{xid}` hérite de `{parent}`, supprimée en amont", module, loc, xid,
+                               f"the view `{xid}` inherits from `{parent}`, removed upstream", module, loc, xid,
                                {"name": parent, "model": model}))
         elif changed:
             arch = changed[0]["changes"].get("arch", {})
             rem, add = arch.get("nodes_removed", []), arch.get("nodes_added", [])
             out.append(finding("review", "view", "view-parent-modified",
-                               f"la vue `{xid}` hérite de `{parent}`, modifiée en amont "
-                               f"({len(rem)} nœud(s) retiré(s), {len(add)} ajouté(s)) : vérifier les xpath",
+                               f"the view `{xid}` inherits from `{parent}`, modified upstream "
+                               f"({len(rem)} node(s) removed, {len(add)} added): check the xpath",
                                module, loc, xid, {"name": parent, "model": model,
                                                   "nodes_removed": rem[:20], "nodes_added": add[:20]}))
             for token in _removed_tokens(_xpath_tokens(info["nodes"]), rem, add):
                 out.append(finding("breaking", "view", "view-xpath-target-removed",
-                                   f"un xpath de `{xid}` cible `{token}`, nœud retiré de `{parent}` en amont",
+                                   f"an xpath of `{xid}` targets `{token}`, a node removed from `{parent}` upstream",
                                    module, loc, xid, {"name": token, "view": parent, "model": model},
                                    confidence="heuristic"))
 
 
 def _template_status(ctx, module, xid):
-    """None | ("removed", {}) | ("modified", changes) pour un template amont référencé par le module."""
+    """None | ("removed", {}) | ("modified", changes) for an upstream template referenced by the module."""
     old = ctx.old.qweb.get(xid)
     if old is None or old["module"] not in ctx.upstream_old[module]:
         return None
@@ -330,32 +342,32 @@ def _template_findings(ctx, module, out):
         st = _template_status(ctx, module, parent) if parent else None
         if st and st[0] == "removed":
             moved = ctx.local_template_ids().get(parent.split(".", 1)[-1], [])
-            hint = f" (existe sous : {', '.join(moved[:3])})" if moved else ""
+            hint = f" (exists as: {', '.join(moved[:3])})" if moved else ""
             out.append(finding("breaking", "template", "template-parent-removed",
-                               f"le template `{xid}` hérite de `{parent}`, supprimé en amont{hint}", module, loc,
+                               f"the template `{xid}` inherits from `{parent}`, removed upstream{hint}", module, loc,
                                xid, {"name": parent, "moved_to": moved[:3]}))
         elif st:
             arch = st[1].get("arch", {})
             rem, add = arch.get("nodes_removed", []), arch.get("nodes_added", [])
             out.append(finding("review", "template", "template-parent-modified",
-                               f"le template `{xid}` hérite de `{parent}`, modifié en amont "
-                               f"({len(rem)} nœud(s) retiré(s), {len(add)} ajouté(s)) : vérifier les xpath",
+                               f"the template `{xid}` inherits from `{parent}`, modified upstream "
+                               f"({len(rem)} node(s) removed, {len(add)} added): check the xpath",
                                module, loc, xid, {"name": parent, "nodes_removed": rem[:20],
                                                   "nodes_added": add[:20]}))
             for token in _removed_tokens(_xpath_tokens(info["nodes"]), rem, add):
                 out.append(finding("breaking", "template", "template-xpath-target-removed",
-                                   f"un xpath de `{xid}` cible `{token}`, nœud retiré de `{parent}` en amont",
+                                   f"an xpath of `{xid}` targets `{token}`, a node removed from `{parent}` upstream",
                                    module, loc, xid, {"name": token, "template": parent}, confidence="heuristic"))
         for called in info.get("calls", []):
             cs = _template_status(ctx, module, called)
             if cs and cs[0] == "removed":
                 out.append(finding("breaking", "template", "template-call-removed",
-                                   f"le template `{xid}` appelle `{called}` (t-call), supprimé en amont",
+                                   f"the template `{xid}` calls `{called}` (t-call), removed upstream",
                                    module, loc, xid, {"name": called}))
 
 
 def model_findings(ctx, module):
-    """Constats sur les modèles touchés par le module : champs, méthodes, vues, templates QWeb."""
+    """Findings on the models touched by the module: fields, methods, views, QWeb templates."""
     out = []
     up, newc = ctx.upstream_old[module], ctx.closure_new[module]
     for model in sorted(ctx.old.module_models.get(module, ())):
@@ -363,13 +375,13 @@ def model_findings(ctx, module):
             continue
         md = ctx.model_diff(model)
         if not any(m in up for m in md["old"]["modules"]):
-            continue   # modèle propre au module custom (ou fourni hors de sa fermeture)
+            continue   # model specific to the custom module (or provided outside its closure)
         if not md["new"]["modules"]:
             attr = ctx.old.data[model][module]["attributes"].get("_inherit") or {}
-            partial = bool(ctx.unresolved[module])   # dépendances introuvables : le modèle y est peut-être défini
+            partial = bool(ctx.unresolved[module])   # unresolved dependencies: the model may be defined there
             out.append(finding("breaking", "model", "model-removed",
-                               f"le modèle `{model}` n'existe plus dans la nouvelle version"
-                               + (" (analyse incomplète : dépendances introuvables)" if partial else ""),
+                               f"the model `{model}` no longer exists in the new version"
+                               + (" (incomplete analysis: unresolved dependencies)" if partial else ""),
                                module, attr.get("loc"), model, {"name": model},
                                confidence="heuristic" if partial else "certain"))
             continue
@@ -381,7 +393,7 @@ def model_findings(ctx, module):
 
 
 # --------------------------------------------------------------------------
-# Règles niveau module : OWL, JS, assets
+# Module-level rules: OWL, JS, assets
 # --------------------------------------------------------------------------
 _OPS = {"before", "after", "replace", "remove", "include", "prepend", "append"}
 _ASSET_PATH = re.compile(r"^(\w+)/(static/.+)$")
@@ -409,36 +421,35 @@ def _owl_findings(ctx, module, out):
         st = _owl_status(ctx, module, parent) if parent else None
         if st and st[0] == "removed":
             out.append(finding("breaking", "owl", "owl-inherit-removed",
-                               f"le template OWL `{key}` hérite de `{parent}` (t-inherit), supprimé en amont",
+                               f"the OWL template `{key}` inherits from `{parent}` (t-inherit), removed upstream",
                                module, loc, key, {"name": parent}))
         elif st:
             out.append(finding("review", "owl", "owl-inherit-modified",
-                               f"le template OWL `{key}` hérite de `{parent}` (t-inherit), modifié en amont : "
-                               f"vérifier les xpath", module, loc, key, {"name": parent}))
+                               f"the OWL template `{key}` inherits from `{parent}` (t-inherit), modified upstream: "
+                               f"check the xpath", module, loc, key, {"name": parent}))
         for sig in info.get("nodes", []):
             m = _OWL_CALL.match(sig)
             cs = _owl_status(ctx, module, m.group(1)) if m else None
             if cs and cs[0] == "removed":
                 out.append(finding("breaking", "owl", "owl-call-removed",
-                                   f"le template OWL `{key}` appelle `{m.group(1)}` (t-call), supprimé en amont",
+                                   f"the OWL template `{key}` calls `{m.group(1)}` (t-call), removed upstream",
                                    module, loc, key, {"name": m.group(1)}))
 
 
 def _method_findings(ctx, module, cls_name, methods, changes, loc, rule_prefix, out, what):
-    article, e = ("la", "e") if what == "classe" else ("le", "")
-    """Méthodes d'une classe / d'un patch qui recoupent les méthodes retirées / modifiées en amont."""
+    """Methods of a class / patch that intersect the methods removed / modified upstream."""
     meth = changes.get("methods") or {}
     for name in sorted(methods):
         if name in meth.get("removed", []):
-            out.append(finding("breaking", "js_class" if what == "classe" else "js_patch",
+            out.append(finding("breaking", "js_class" if what == "class" else "js_patch",
                                f"{rule_prefix}-removed",
-                               f"{article} {what} `{cls_name}` surcharge `{name}`, supprimé{e} de la classe amont", module,
+                               f"the {what} `{cls_name}` overrides `{name}`, removed from the upstream class", module,
                                loc, cls_name, {"name": name, "class": cls_name}))
         elif name in meth.get("changed", {}):
             ch = meth["changed"][name]
-            out.append(finding("review", "js_class" if what == "classe" else "js_patch",
+            out.append(finding("review", "js_class" if what == "class" else "js_patch",
                                f"{rule_prefix}-changed",
-                               f"{article} {what} `{cls_name}` surcharge `{name}`, dont les paramètres changent en amont : "
+                               f"the {what} `{cls_name}` overrides `{name}`, whose parameters change upstream: "
                                f"{ch['old']} -> {ch['new']}", module, loc, cls_name,
                                {"name": name, "class": cls_name}))
 
@@ -466,21 +477,21 @@ def _js_findings(ctx, module, out):
             continue
         if (src, name) in moved:
             to = moved[(src, name)]["to"]
-            hint = "" if to["module"] in newc else " : ajouter cette dépendance au manifest"
+            hint = "" if to["module"] in newc else ": add this dependency to the manifest"
             out.append(finding("breaking", "js_import", "js-import-moved",
-                               f"`{name}` importé depuis `{src}` est maintenant exporté par `{to['path']}`{hint}",
+                               f"`{name}` imported from `{src}` is now exported by `{to['path']}`{hint}",
                                module, imp["loc"], name, {"name": name, "from_path": src, "to_path": to["path"],
                                                            "to_module": to["module"]}))
         elif (src, name) in removed:
             out.append(finding("breaking", "js_import", "js-import-removed",
-                               f"`{name}` importé depuis `{src}` n'est plus exporté en amont", module, imp["loc"],
+                               f"`{name}` imported from `{src}` is no longer exported upstream", module, imp["loc"],
                                name, {"name": name, "path": src, "module": removed[(src, name)]}))
         elif (src, name) in cls_mod:
             meth = cls_mod[(src, name)].get("methods") or {}
             out.append(finding("review", "js_import", "js-class-modified",
-                               f"la classe `{name}` importée depuis `{src}` a changé en amont "
-                               f"(méthodes retirées : {', '.join(meth.get('removed', [])) or '-'}; "
-                               f"modifiées : {', '.join(meth.get('changed', {})) or '-'})", module, imp["loc"],
+                               f"the class `{name}` imported from `{src}` changed upstream "
+                               f"(methods removed: {', '.join(meth.get('removed', [])) or '-'}; "
+                               f"modified: {', '.join(meth.get('changed', {})) or '-'})", module, imp["loc"],
                                name, {"name": name, "path": src}))
 
     for key, data in sorted(ctx.old.mod[module]["js_classes"].items()):
@@ -488,7 +499,7 @@ def _js_findings(ctx, module, out):
         imp = by_file.get(data["loc"].rsplit(":", 1)[0], {}).get(ext) if ext and _PLAIN.match(ext) else None
         if imp and imp in cls_mod:
             _method_findings(ctx, module, key.split("::", 1)[1], data.get("methods", {}), cls_mod[imp],
-                             data["loc"], "js-method", out, "classe")
+                             data["loc"], "js-method", out, "class")
     for key, data in sorted(ctx.old.mod[module]["js_patches"].items()):
         ident = re.match(r"^([\w$]+)", key.split("::", 1)[1])
         imp = by_file.get(data["loc"].rsplit(":", 1)[0], {}).get(ident.group(1)) if ident else None
@@ -501,12 +512,12 @@ def _js_findings(ctx, module, out):
     for key, data in sorted(ctx.old.mod[module]["js_registries"].items()):
         if key in old_keys and key not in new_keys:
             out.append(finding("review", "registry", "registry-key-removed",
-                               f"l'entrée de registre `{key}` surchargée ici n'est plus enregistrée par les "
-                               f"dépendances (supprimée ou déplacée)", module, data["loc"], key, {"name": key}))
+                               f"the registry entry `{key}` overridden here is no longer registered by the "
+                               f"dependencies (removed or moved)", module, data["loc"], key, {"name": key}))
         elif key not in old_keys and key in new_keys:
             out.append(finding("review", "registry", "registry-clash",
-                               f"la clé de registre `{key}` est maintenant aussi enregistrée en amont : doublon "
-                               f"possible (DuplicatedKeyError sans `force`)", module, data["loc"], key,
+                               f"the registry key `{key}` is now also registered upstream: possible "
+                               f"duplicate (DuplicatedKeyError without `force`)", module, data["loc"], key,
                                {"name": key}))
 
 
@@ -521,8 +532,8 @@ def _asset_findings(ctx, module, out):
         if name in old_bundles and name not in new_bundles and name not in reported:
             reported.add(name)
             out.append(finding("breaking", "asset", "asset-bundle-removed",
-                               f"le bundle `{name}` n'est plus déclaré par les dépendances : vérifier qu'il existe "
-                               f"toujours", module, loc, name, {"name": name}, confidence="heuristic"))
+                               f"the bundle `{name}` is no longer declared by the dependencies: check that it still "
+                               f"exists", module, loc, name, {"name": name}, confidence="heuristic"))
 
     for b, entries in sorted(ctx.old.mod[module]["assets"].items()):
         bundle(b)
@@ -541,12 +552,12 @@ def _asset_findings(ctx, module, out):
                 diff = ctx.module_diffs.get(m.group(1))
                 if diff and any(e["name"] == m.group(2) for e in diff["js_files"]["removed"]):
                     out.append(finding("breaking", "asset", "asset-file-removed",
-                                       f"le bundle `{b}` référence `{arg}`, fichier supprimé en amont", module,
+                                       f"the bundle `{b}` references `{arg}`, a file removed upstream", module,
                                        loc, b, {"name": arg}))
 
 
 def module_findings(ctx, module):
-    """Constats niveau module : OWL, imports / classes / patchs / registres JS, assets."""
+    """Module-level findings: OWL, JS imports / classes / patches / registries, assets."""
     out = []
     _owl_findings(ctx, module, out)
     _js_findings(ctx, module, out)
@@ -555,10 +566,10 @@ def module_findings(ctx, module):
 
 
 # --------------------------------------------------------------------------
-# XML ids / env.ref et mentions textuelles
+# XML ids / env.ref and textual mentions
 # --------------------------------------------------------------------------
 def xmlid_findings(ctx, module):
-    """Références du module (XML, env.ref) à des XML ids amont qui n'existent plus dans NEW."""
+    """References of the module (XML, env.ref) to upstream XML ids that no longer exist in NEW."""
     out, seen = [], set()
     up = ctx.upstream_old[module]
     local = {}
@@ -576,11 +587,11 @@ def xmlid_findings(ctx, module):
         moved = [x for x in local.get(name, []) if x.split(".", 1)[0] != prefix]
         if moved:
             out.append(finding("breaking", "xml_ref", "xmlid-moved",
-                               f"référence `{xid}` ({r['kind']}) : l'identifiant est maintenant `{moved[0]}`",
+                               f"reference `{xid}` ({r['kind']}): the identifier is now `{moved[0]}`",
                                module, r["loc"], xid, {"name": xid, "kind": r["kind"], "to": moved[0]}))
         else:
             out.append(finding("breaking", "xml_ref", "xmlid-removed",
-                               f"référence `{xid}` ({r['kind']}) : l'identifiant n'existe plus en amont", module,
+                               f"reference `{xid}` ({r['kind']}): the identifier no longer exists upstream", module,
                                r["loc"], xid, {"name": xid, "kind": r["kind"]}))
     return out
 
@@ -593,9 +604,9 @@ _PY_XML_JS = (".py", ".xml", ".js")
 
 
 def _removed_upstream_names(ctx, module):
-    """{nom: (nature, extensions)} des champs / méthodes / exports JS supprimés en amont (>= 4 caractères).
+    """{name: (nature, extensions)} of the fields / methods / JS exports removed upstream (>= 4 characters).
 
-    Les noms d'exports JS ne sont cherchés que dans les .js (un nom de classe Python identique n'est pas une mention).
+    JS export names are searched only in .js files (an identical Python class name is not a mention).
     """
     up, names = ctx.upstream_old[module], {}
     for model in sorted(ctx.old.module_models.get(module, ())):
@@ -604,9 +615,9 @@ def _removed_upstream_names(ctx, module):
         md = ctx.model_diff(model)
         if not any(m in up for m in md["old"]["modules"]) or not md["new"]["modules"]:
             continue
-        for section, kind in (("fields", "champ"), ("methods", "méthode")):
+        for section, kind in (("fields", "field"), ("methods", "method")):
             for n in _removed_names(md, section, up):
-                names.setdefault(n, (f"{kind} de {model}", _PY_XML_JS))
+                names.setdefault(n, (f"{kind} of {model}", _PY_XML_JS))
     for _, d in _up_diffs(ctx, module):
         for e in d["js_exports"]["removed"]:
             names.setdefault(e["name"], ("export JS", (".js",)))
@@ -614,7 +625,7 @@ def _removed_upstream_names(ctx, module):
 
 
 def mention_findings(ctx, module, existing):
-    """Heuristique : mentions textuelles (mot entier) de noms supprimés en amont dans les fichiers du module."""
+    """Heuristic: textual mentions (whole word) of names removed upstream in the module's files."""
     names = _removed_upstream_names(ctx, module)
     if not names:
         return []
@@ -645,14 +656,14 @@ def mention_findings(ctx, module, existing):
     for (rel, name), lines in sorted(hits.items()):
         lines = sorted(set(lines))
         out.append(finding("review", "mention", "mention-removed-name",
-                           f"mention de `{name}` ({names[name][0]}, supprimé en amont) aux lignes "
+                           f"mention of `{name}` ({names[name][0]}, removed upstream) at line(s) "
                            f"{', '.join(map(str, lines[:10]))}", module, f"{rel}:{lines[0]}", name,
                            {"name": name, "kind": names[name][0], "lines": lines[:10]}, confidence="heuristic"))
     return out
 
 
 def all_findings(ctx, module):
-    """Toutes les règles pour un module custom, sans doublon (xml ids et mentions déjà couverts écartés)."""
+    """All the rules for a custom module, without duplicates (already covered xml ids and mentions dropped)."""
     base = dependency_findings(ctx, module) + model_findings(ctx, module) + module_findings(ctx, module)
     covered = {(f["custom"]["loc"].split(":")[0], f["upstream"].get("name")) for f in base if f["custom"]["loc"]}
     xml = [f for f in xmlid_findings(ctx, module)
@@ -662,18 +673,18 @@ def all_findings(ctx, module):
 
 
 # --------------------------------------------------------------------------
-# Rapport
+# Report
 # --------------------------------------------------------------------------
-LEVEL_LABELS = {"breaking": "Cassant", "review": "À vérifier", "info": "Info"}
+LEVEL_LABELS = {"breaking": "Breaking", "review": "To review", "info": "Info"}
 LIMITS = [
-    "L'usage d'un champ, d'une méthode ou d'un export supprimé dans du code (getattr, noms construits, domaines) "
-    "n'est détecté que par mention textuelle (heuristique).",
-    "Les xpath ne sont pas évalués : on compare les chaînes citées aux nœuds retirés de l'arch parente (heuristique).",
-    "Un élément déplacé vers un module qui existait déjà dans OLD hors de la fermeture de dépendances apparaît "
-    "comme supprimé.",
-    "Les fichiers statiques autres que JS et templates OWL (scss, images) ne sont pas suivis.",
-    "Les bundles d'assets déclarés seulement dans des templates peuvent être signalés à tort.",
-    "Les identifiants générés (model_*, field_*) ne sont pas suivis.",
+    "The use of a removed field, method or export in code (getattr, built names, domains) "
+    "is detected only through textual mentions (heuristic).",
+    "xpath expressions are not evaluated: the quoted strings are compared to the nodes removed from the parent arch (heuristic).",
+    "An item moved to a module that already existed in OLD outside the dependency closure appears "
+    "as removed.",
+    "Static files other than JS and OWL templates (scss, images) are not tracked.",
+    "Asset bundles declared only in templates may be reported by mistake.",
+    "Generated identifiers (model_*, field_*) are not tracked.",
 ]
 
 
@@ -682,11 +693,14 @@ def _sort_key(f):
             str(f["upstream"].get("name")))
 
 
-def analyze(old_paths, new_paths, custom_paths, modules, old_label=None, new_label=None):
-    """Rapport odoo-impact/1 pour les modules custom demandés."""
-    ctx = build_context(old_paths, new_paths, custom_paths, modules, old_label, new_label)
+def analyze(old_paths, new_paths, custom_paths, modules, old_label=None, new_label=None, progress=None):
+    """odoo-impact/1 report for the requested custom modules."""
+    ctx = build_context(old_paths, new_paths, custom_paths, modules, old_label, new_label, progress)
     report_modules = {}
-    for m in modules:
+    update = progress.task("Analyzing custom modules", len(modules)) if progress else None
+    for done, m in enumerate(modules):
+        if update:
+            update(done, m)
         findings = sorted(all_findings(ctx, m), key=_sort_key)
         counts = Counter(f["level"] for f in findings)
         report_modules[m] = {
@@ -695,6 +709,8 @@ def analyze(old_paths, new_paths, custom_paths, modules, old_label=None, new_lab
                         "unresolved": ctx.unresolved[m]},
             "counts": {**{lv: counts[lv] for lv in LEVELS}, "total": len(findings)},
             "findings": findings}
+    if update:
+        update(len(modules))
     stats = Counter()
     for d in ctx.module_diffs.values():
         stats.update(d["stats_total"])
@@ -702,8 +718,8 @@ def analyze(old_paths, new_paths, custom_paths, modules, old_label=None, new_lab
         stats.update(md["diff"]["stats_total"])
     limits = list(LIMITS)
     if not js.HAS_TREE_SITTER:
-        limits.append("tree-sitter n'est pas installé : les règles JS (imports, classes, patchs, registres) "
-                      "n'ont pas été appliquées.")
+        limits.append("tree-sitter is not installed: the JS rules (imports, classes, patches, registries) "
+                      "were not applied.")
     return {"format": "odoo-impact/1", "old_label": old_label, "new_label": new_label,
             "paths": {"old": list(old_paths), "new": list(new_paths), "custom": list(custom_paths)},
             "modules": report_modules,
@@ -716,66 +732,85 @@ def _cell(text):
 
 
 def render_markdown(report):
-    """Rapport lisible : un titre par module, trois niveaux, tableau Catégorie / Custom / Amont / Constat."""
-    lines = [f"# Impact de la montée de version {report.get('old_label') or 'old'} -> "
+    """Readable report: one heading per module, three levels, Category / Custom / Upstream / Finding table."""
+    lines = [f"# Upgrade impact {report.get('old_label') or 'old'} -> "
              f"{report.get('new_label') or 'new'}", ""]
     for module, mod in report["modules"].items():
         c, cl = mod["counts"], mod["closure"]
         lines += [f"## Module `{module}`", "",
-                  f"Cassant : **{c['breaking']}** | À vérifier : **{c['review']}** | Info : **{c['info']}**", "",
-                  f"Dépendances amont analysées ({len(cl['upstream'])}) : "
-                  + (", ".join(f"`{m}`" for m in cl["upstream"]) or "aucune")]
+                  f"Breaking: **{c['breaking']}** | To review: **{c['review']}** | Info: **{c['info']}**", "",
+                  f"Upstream dependencies analyzed ({len(cl['upstream'])}): "
+                  + (", ".join(f"`{m}`" for m in cl["upstream"]) or "none")]
         if cl["missing_in_new"]:
-            lines.append("Absentes de la nouvelle version : " + ", ".join(f"`{m}`" for m in cl["missing_in_new"]))
+            lines.append("Missing from the new version: " + ", ".join(f"`{m}`" for m in cl["missing_in_new"]))
         lines.append("")
         for level in LEVELS:
             items = [f for f in mod["findings"] if f["level"] == level]
             lines += [f"### {LEVEL_LABELS[level]} ({len(items)})", ""]
             if not items:
-                lines += ["Rien à signaler.", ""]
+                lines += ["Nothing to report.", ""]
                 continue
-            lines += ["| Catégorie | Custom | Amont | Constat |", "|---|---|---|---|"]
+            lines += ["| Category | Custom | Upstream | Finding |", "|---|---|---|---|"]
             for f in items:
                 up = f["upstream"]
                 target = up.get("name", "") + (f" -> {up['to_module']}" if up.get("to_module") else "")
-                note = " (heuristique)" if f["confidence"] == "heuristic" else ""
+                note = " (heuristic)" if f["confidence"] == "heuristic" else ""
                 lines.append(f"| {_cell(f['category'])} | `{_cell(f['custom']['loc'] or f['custom']['module'])}` | "
                              f"{_cell(target)} | {_cell(f['message'])}{note} |")
             lines.append("")
-    lines += ["## Limites", ""] + [f"- {x}" for x in report["limits"]] + [""]
+    lines += ["## Limits", ""] + [f"- {x}" for x in report["limits"]] + [""]
     return "\n".join(lines)
+
+
+CSV_COLUMNS = ["module", "level", "category", "rule", "confidence", "custom_loc", "custom_name",
+               "upstream_name", "upstream_to_module", "message"]
+
+
+def write_findings_csv(report, path):
+    """One row per finding, all modules."""
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    with open(path, "w", newline="", encoding="utf-8") as fh:
+        w = csv.writer(fh)
+        w.writerow(CSV_COLUMNS)
+        for module, mod in report["modules"].items():
+            for f in mod["findings"]:
+                up = f["upstream"]
+                w.writerow([module, f["level"], f["category"], f["rule"], f["confidence"], f["custom"]["loc"] or "",
+                            f["custom"]["name"] or "", up.get("name", ""), up.get("to_module", ""), f["message"]])
 
 
 def main(argv=None):
     p = argparse.ArgumentParser(prog="omodi impact",
-                                description="Ce à quoi faire attention pour monter de version des modules custom")
-    p.add_argument("--old", nargs="+", required=True, help="chemins d'addons de l'ancienne version")
-    p.add_argument("--new", nargs="+", required=True, help="chemins d'addons de la nouvelle version")
-    p.add_argument("--custom", nargs="+", default=[], help="chemins d'addons custom (cherchés avant --old)")
-    p.add_argument("--modules", nargs="+", help="modules custom à analyser")
-    p.add_argument("--modules-file", help="fichier listant les modules (un par ligne ou séparés par des virgules)")
-    p.add_argument("--old-label", default="old")
-    p.add_argument("--new-label", default="new")
-    p.add_argument("-o", "--output", required=True, help="dossier de sortie (impact.json, impact.md)")
+                                description="What to watch out for when upgrading custom modules")
+    p.add_argument("--old", nargs="+", required=True, help="addons paths of the old version")
+    p.add_argument("--new", nargs="+", required=True, help="addons paths of the new version")
+    p.add_argument("--custom", nargs="+", default=[], help="custom addons paths (searched before --old)")
+    p.add_argument("--modules", nargs="+", help="custom modules to analyze")
+    p.add_argument("--modules-file", help="file listing the modules (one per line or comma-separated)")
+    p.add_argument("--old-label", default="old", help="label of the old version (e.g. 20.0)")
+    p.add_argument("--new-label", default="new", help="label of the new version (e.g. 21.0)")
+    add_output_args(p, "the report (impact.json, impact.csv)")
     a = p.parse_args(argv)
+    check_output_args(p, a)
     modules = read_modules(a)
     if not modules:
-        p.error("donne au moins un module (--modules ou --modules-file)")
+        p.error("give at least one module (--modules or --modules-file)")
     t0 = time.time()
     try:
-        report = analyze(a.old, a.new, a.custom, modules, a.old_label, a.new_label)
+        report = analyze(a.old, a.new, a.custom, modules, a.old_label, a.new_label,
+                         Progress(enabled=not a.quiet))
     except ImpactError as e:
         p.error(str(e))
-    ex.write_json(report, os.path.join(a.output, "impact.json"))
-    with open(os.path.join(a.output, "impact.md"), "w", encoding="utf-8") as fh:
-        fh.write(render_markdown(report))
-    print(f"{a.old_label} -> {a.new_label} | {len(modules)} module(s) custom ({time.time() - t0:.1f}s)")
-    for m, mod in report["modules"].items():
-        c = mod["counts"]
-        print(f"{m}: cassant {c['breaking']} | à vérifier {c['review']} | info {c['info']} "
-              f"({len(mod['closure']['upstream'])} dépendances amont)")
-    print(f"Résultats -> {a.output}/ (impact.json, impact.md)")
-
+    print(render_markdown(report))   # the Markdown report always goes to the console
+    written = []
+    if wants(a, "json"):
+        ex.write_json(report, os.path.join(a.output, "impact.json"))
+        written.append("impact.json")
+    if wants(a, "csv"):
+        write_findings_csv(report, os.path.join(a.output, "impact.csv"))
+        written.append("impact.csv")
+    if written and not a.quiet:
+        print(f"Results -> {a.output}/ ({', '.join(written)}) in {time.time() - t0:.1f}s", file=sys.stderr)
 
 if __name__ == "__main__":
     main()

@@ -4,7 +4,7 @@ from unittest import mock
 from omodi import impact, js
 from tests.helpers import IMP_OLD, IMP_NEW, IMP_CUSTOM, quiet
 
-needs_ts = unittest.skipUnless(js.HAS_TREE_SITTER, "tree-sitter non installé")
+needs_ts = unittest.skipUnless(js.HAS_TREE_SITTER, "tree-sitter not installed")
 
 
 def pick(findings, rule, name=None):
@@ -128,12 +128,13 @@ class ModuleRulesTest(unittest.TestCase):
 
     @needs_ts
     def test_js_export_names_only_searched_in_js_files(self):
-        # `Gone` est aussi le nom d'une classe Python du module : pas une mention de l'export JS supprimé
+        # `Gone` est aussi le nom d'une classe Python du module : not a mention of the removed JS export
         files = [x["custom"]["loc"] for x in pick(self.every, "mention-removed-name", "Gone")]
         self.assertFalse([f for f in files if not f.split(":")[0].endswith(".js")])
 
     def test_patch_wording(self):
-        self.assertTrue(all("la patch" not in f["message"] for f in self.every))
+        self.assertTrue(all(f["message"].startswith("the patch") for f in self.every
+                            if f["rule"].startswith("js-patch-method")))
 
     def test_short_names_never_mentioned(self):
         self.assertFalse([f for f in self.every if f["rule"] == "mention-removed-name"
@@ -147,7 +148,7 @@ class NoTreeSitterTest(unittest.TestCase):
             every = impact.all_findings(ctx, "cust")
         self.assertEqual(len([l for l in err.splitlines() if "tree-sitter" in l]), 1)
         self.assertFalse([f for f in every if f["category"].startswith("js") or f["rule"].startswith("registry")])
-        self.assertTrue(pick(every, "field-removed", "f_removed"))     # les autres règles tournent
+        self.assertTrue(pick(every, "field-removed", "f_removed"))     # the other rules still run
         self.assertTrue(pick(every, "asset-file-removed"))
 
 

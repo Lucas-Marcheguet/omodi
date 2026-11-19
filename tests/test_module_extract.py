@@ -26,7 +26,7 @@ class ModuleExtractTest(unittest.TestCase):
         q = extract(OLD)["qweb_templates"]
         self.assertIn("demo.portal_thing", q)
         self.assertEqual(q["demo.portal_thing"]["calls"], ["portal.x"])
-        self.assertNotIn("demo.report_demo", q)   # rattaché au modèle
+        self.assertNotIn("demo.report_demo", q)   # attached to the model
 
     def test_owl_key_t_name(self):
         o = extract(OLD)["owl_templates"]
@@ -70,7 +70,7 @@ class ModuleExtractTest(unittest.TestCase):
     def test_invalid_owl_xml_does_not_crash(self):
         with tmp_addons({"m/__manifest__.py": "{}", "m/static/src/bad.xml": "<templates><t"}) as p:
             _, _, err = quiet(Index, [p])
-        self.assertIn("XML invalide", err)
+        self.assertIn("invalid XML", err)
 
 
 if __name__ == "__main__":

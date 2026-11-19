@@ -10,7 +10,7 @@ NEW = os.path.join(HERE, "fixtures", "new")
 
 @contextlib.contextmanager
 def tmp_addons(files):
-    """Crée un dossier d'addons temporaire depuis {chemin_relatif: contenu}."""
+    """Creates a temporary addons folder from {relative_path: content}."""
     with tempfile.TemporaryDirectory() as tmp:
         for rel, content in files.items():
             path = os.path.join(tmp, rel)
@@ -21,7 +21,7 @@ def tmp_addons(files):
 
 
 def quiet(fn, *args, **kw):
-    """Exécute fn en capturant stdout/stderr ; retourne (résultat, stdout, stderr)."""
+    """Runs fn capturing stdout/stderr; returns (result, stdout, stderr)."""
     out, err = io.StringIO(), io.StringIO()
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
         res = fn(*args, **kw)

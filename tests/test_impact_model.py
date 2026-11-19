@@ -96,13 +96,13 @@ class ModelRulesTest(unittest.TestCase):
     def test_inherited_model_removed_breaking(self):
         f = pick(self.model, "model-removed", "up.old_model")
         self.assertEqual([(x["level"], x["category"]) for x in f], [("breaking", "model")])
-        self.assertFalse(pick(self.model, "field-removed", "x"))   # pas de bruit sur le contenu du modèle
+        self.assertFalse(pick(self.model, "field-removed", "x"))   # no noise on the model content
 
     def test_model_removed_is_heuristic_when_dependencies_unresolved(self):
-        # `unknown_mod` est introuvable : le modèle pourrait être défini là où on ne voit pas
+        # `unknown_mod` cannot be found: the model could be defined where we cannot see
         f = pick(self.model, "model-removed", "up.old_model")
         self.assertEqual(f[0]["confidence"], "heuristic")
-        self.assertIn("incomplète", f[0]["message"])
+        self.assertIn("incomplete", f[0]["message"])
 
     def test_view_parent_modified_review(self):
         f = pick(self.model, "view-parent-modified", "up.thing_form")

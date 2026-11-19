@@ -1,11 +1,11 @@
 """
-js.py — analyse des fichiers JS d'Odoo (static/src/**/*.js).
+js.py — analysis of Odoo JS files (static/src/**/*.js).
 
-Niveau 1 (stdlib) : sha1 et nombre de lignes par fichier (file_info).
-Niveau 2 (tree-sitter, optionnel) : chemin d'import Odoo, exports, classes, registres, patchs (analyze).
-Si tree-sitter n'est pas installé : un seul warning, les sections structurelles restent vides.
+Level 1 (stdlib): sha1 and line count per file (file_info).
+Level 2 (tree-sitter, optional): Odoo import path, exports, classes, registries, patches (analyze).
+If tree-sitter is not installed: a single warning, the structural sections stay empty.
 
-Dépendances optionnelles : pip install tree-sitter tree-sitter-javascript  (py-tree-sitter >= 0.22 :
+Optional dependencies: pip install tree-sitter tree-sitter-javascript  (py-tree-sitter >= 0.22 :
 Language(tree_sitter_javascript.language()), Parser(lang)).
 """
 from __future__ import annotations
@@ -15,21 +15,21 @@ import posixpath
 import re
 import sys
 
-try:  # dépendances optionnelles
+try:  # optional dependencies
     import tree_sitter_javascript as _tsjs
     from tree_sitter import Language as _Language, Parser as _Parser
     HAS_TREE_SITTER = True
-except Exception:  # ImportError, ou binaire incompatible
+except Exception:  # ImportError, or incompatible binary
     HAS_TREE_SITTER = False
 
 VALUE_MAX = 200
 _WARNED = False
 _PARSER = None
 
-# Même grammaire d'en-tête que odoo/tools/js_transpiler.py (ODOO_MODULE_RE)
+# Same header grammar as odoo/tools/js_transpiler.py (ODOO_MODULE_RE)
 ODOO_MODULE_RE = re.compile(r"""
-    \s*\/(\*|\/)                      # /* ou //
-    .*                                # commentaire éventuel
+    \s*\/(\*|\/)                      # /* or //
+    .*                                # optional comment
     @odoo-module
     (?P<ignore>\s+ignore)?
     (\s+alias=(?P<alias>[^\s*]+))?
@@ -42,30 +42,30 @@ def warn(msg):
 
 
 def tree_sitter_available():
-    """True si tree-sitter est utilisable ; émet un seul warning sinon."""
+    """True if tree-sitter is usable; emits a single warning otherwise."""
     global _WARNED
     if HAS_TREE_SITTER:
         return True
     if not _WARNED:
         _WARNED = True
-        warn("tree-sitter indisponible : sections JS structurelles vides "
+        warn("tree-sitter unavailable: structural JS sections are empty "
              "(pip install tree-sitter tree-sitter-javascript)")
     return False
 
 
 # --------------------------------------------------------------------------
-# Niveau 1
+# Level 1
 # --------------------------------------------------------------------------
 def file_info(data):
-    """{"sha1", "lines"} d'un contenu (bytes)."""
+    """{"sha1", "lines"} of a content (bytes)."""
     lines = data.count(b"\n") + (1 if data and not data.endswith(b"\n") else 0)
     return {"sha1": hashlib.sha1(data).hexdigest(), "lines": lines}
 
 
 def import_path(module, rel, header_text):
-    """Chemin d'import Odoo d'un fichier static/src/<rel> : "@module/chemin" sans .js ni /index.
+    """Odoo import path of a static/src/<rel> file: "@module/path" without .js or /index.
 
-    L'alias déclaré dans l'en-tête (@odoo-module alias=...) a priorité ; "@odoo-module ignore" -> None.
+    The alias declared in the header (@odoo-module alias=...) takes precedence; "@odoo-module ignore" -> None.
     """
     m = ODOO_MODULE_RE.match(header_text or "")
     if m and m.group("ignore"):
@@ -81,7 +81,7 @@ def import_path(module, rel, header_text):
 
 
 # --------------------------------------------------------------------------
-# Niveau 2
+# Level 2
 # --------------------------------------------------------------------------
 def _parser():
     global _PARSER
@@ -95,7 +95,7 @@ def _text(node):
 
 
 def _str_value(node):
-    """Contenu d'un littéral chaîne, sinon le texte normalisé du nœud."""
+    """Content of a string literal, otherwise the node's normalized text."""
     if node.type == "string":
         return node.text.decode("utf-8", "replace")[1:-1]
     return _text(node)
@@ -114,7 +114,7 @@ def _line(node):
 
 
 def _declared_kinds(root):
-    """{nom: genre} des déclarations de premier niveau (pour `export { a as b }`)."""
+    """{name: kind} of the top-level declarations (for `export { a as b }`)."""
     kinds = {}
     for st in root.named_children:
         if not _ok(st):
@@ -227,7 +227,7 @@ def _classes(root, ip, loc, out):
 
 
 def _registry_chain(fn):
-    """Catégories de `registry.category("a").category("b").add` ; None si la chaîne n'est pas un registre."""
+    """Categories of `registry.category("a").category("b").add`; None if the chain is not a registry."""
     cats, cur = [], fn.child_by_field_name("object")
     while cur is not None and cur.type == "call_expression":
         f = cur.child_by_field_name("function")
@@ -244,7 +244,7 @@ def _registry_chain(fn):
 
 
 def _calls(root):
-    """Tous les call_expression valides (parcours itératif, nœuds ERROR ignorés)."""
+    """All valid call_expression nodes (iterative walk, ERROR nodes ignored)."""
     stack = [root]
     while stack:
         n = stack.pop()
@@ -292,12 +292,12 @@ def _registries_and_patches(root, ip, loc, registries, patches):
                 methods, props = _object_members(a[-1])
                 entry["methods"] = sorted(set(entry["methods"]) | set(methods))
                 entry["properties"] = sorted(set(entry["properties"]) | set(props))
-            else:   # patch(Cible, mixin()) : extension non littérale, on garde son texte
+            else:   # patch(Target, mixin()): non-literal extension, keep its text
                 entry["extension"] = _text(a[-1])[:VALUE_MAX]
 
 
 def resolve_source(source, module, rel_file):
-    """Chemin d'import absolu d'une source d'import : "./x" (relatif à static/src/<rel_file>) -> "@module/..."."""
+    """Absolute import path of an import source: "./x" (relative to static/src/<rel_file>) -> "@module/..."."""
     if not source.startswith("."):
         return source
     path = posixpath.normpath(posixpath.join(posixpath.dirname(rel_file), source))
@@ -307,7 +307,7 @@ def resolve_source(source, module, rel_file):
 
 
 def _imports(root, loc):
-    """Instructions `import` : [{source, imported (nom | "default" | "*" | None), local, loc}]."""
+    """`import` statements: [{source, imported (name | "default" | "*" | None), local, loc}]."""
     out = []
     for st in root.named_children:
         if st.type != "import_statement" or not _ok(st):
@@ -339,11 +339,11 @@ def _imports(root, loc):
 
 
 def analyze(data, ip, loc, with_imports=False):
-    """Analyse structurelle d'un fichier JS (bytes) -> exports, classes, registries, patches.
+    """Structural analysis of a JS file (bytes) -> exports, classes, registries, patches.
 
-    ip : chemin d'import Odoo du fichier ; loc : chemin affiché dans les `loc` (fichier:ligne).
-    with_imports : ajoute la clé "imports" (instructions import, pour l'analyse d'impact).
-    Ne lève jamais : en cas d'échec, warning et sections vides.
+    ip: Odoo import path of the file; loc: path shown in the `loc` values (file:line).
+    with_imports: adds the "imports" key (import statements, for the impact analysis).
+    Never raises: on failure, a warning and empty sections.
     """
     out = {"exports": {}, "classes": {}, "registries": {}, "patches": {}}
     if with_imports:
@@ -357,8 +357,8 @@ def analyze(data, ip, loc, with_imports=False):
         _exports(root, ip, loc, out["exports"])
         _classes(root, ip, loc, out["classes"])
         _registries_and_patches(root, ip, loc, out["registries"], out["patches"])
-    except Exception as e:  # tolérance aux erreurs : un fichier ne doit jamais faire planter un run
-        warn(f"analyse JS impossible {loc}: {e}")
+    except Exception as e:  # error tolerance: one file must never crash a run
+        warn(f"cannot analyze JS {loc}: {e}")
         return {"exports": {}, "classes": {}, "registries": {}, "patches": {},
                 **({"imports": []} if with_imports else {})}
     return out

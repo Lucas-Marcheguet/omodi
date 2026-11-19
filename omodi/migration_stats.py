@@ -1,38 +1,37 @@
 #!/usr/bin/env python3
 """
-omodi stats — enchaîne extraction + comparaison pour une liste de modules.
+omodi stats — chains extraction + comparison for a list of modules.
 
-Entrée  : deux versions d'Odoo (chemins d'addons) + la liste des modules à vérifier.
-Étapes  : 1. indexe les deux versions une seule fois (extract.Index : Python, XML, QWeb, OWL, JS, assets)
-          2. trouve tous les modèles touchés par ces modules (dans l'une ou l'autre version)
-          3. extrait chaque modèle dans les deux versions   -> OUT/old/<modèle>.json, OUT/new/<modèle>.json
-             et chaque module listé (templates non rattachés, OWL, JS, assets)
-                                                              -> OUT/old/modules/<module>.json, OUT/new/modules/...
-          4. compare                                        -> OUT/diff/<modèle>.json, OUT/diff/modules/<module>.json
-             (lignes JS ajoutées / retirées exactes via difflib ; exports déplacés entre modules détectés,
-             y compris vers des modules non listés)
-          5. agrège les stats                               -> OUT/stats.json + CSV
-Les extractions de modèles contiennent tous les modules qui touchent le modèle (utile pour détecter
-les déplacements) ; les stats sont restreintes aux modules demandés, sauf --all-modules (modèles uniquement).
+Input : two Odoo versions (addons paths) + the list of modules to check.
+Steps : 1. indexes both versions once (extract.Index: Python, XML, QWeb, OWL, JS, assets)
+        2. finds every model touched by these modules (in either version)
+        3. extracts each model in both versions            -> OUT/old/<model>.json, OUT/new/<model>.json
+           and each listed module (unattached templates, OWL, JS, assets)
+                                                            -> OUT/old/modules/<module>.json, OUT/new/modules/...
+        4. compares                                         -> OUT/diff/<model>.json, OUT/diff/modules/<module>.json
+           (exact JS lines added / removed via difflib; exports moved between modules are detected,
+           including towards unlisted modules)
+        5. aggregates the stats                             -> OUT/stats.json + CSV
+Model extractions contain every module touching the model (useful to detect moves); the stats are
+restricted to the requested modules, except with --all-modules (models only).
 
-Usage :
+Usage:
   omodi stats \\
       --old odoo-20/addons odoo-20/odoo/addons enterprise-20 \\
       --new odoo-21/addons odoo-21/odoo/addons enterprise-21 \\
-      --modules sale stock account          # ou --modules-file modules.txt (un par ligne, # = commentaire)
+      --modules sale stock account          # or --modules-file modules.txt (one per line, # = comment)
       --old-label 20.0 --new-label 21.0 -o migration_20_21/
-  omodi stats --old ... --new ... --modules ... -o ...     # même chose via le CLI installé
 
-Sorties dans OUT/ :
-  stats.json             totaux, par module, par modèle, par (module, modèle)
-  stats_by_module.csv    une ligne par module (les colonnes frontend sont ajoutées à droite)
-  stats_by_model.csv     une ligne par modèle
-  stats_detail.csv       une ligne par (module, modèle)
-  stats_frontend.csv     une ligne par module : templates QWeb / OWL, JS, assets (FRONTEND_KEYS)
-  old/ new/ diff/        les JSON intermédiaires (modèles à la racine, modules dans modules/)
-Résumé console : lignes « Templates » et « JS » en plus des lignes existantes.
-Stdlib uniquement, Python >= 3.9 ; tree-sitter + tree-sitter-javascript optionnels (pip install omodi[js])
-pour les stats JS structurelles (exports, classes, registres, patchs). Paquet omodi.
+Output: the console summary is always printed. Files are written only with -o [DIR] (default ./omodi-output),
+in the format(s) chosen by -f {json,csv,all}:
+  json: stats.json (totals, per module, per model, per (module, model)) and the intermediate JSON in
+        old/ new/ diff/ (models at the root, modules in modules/)
+  csv : stats_by_module.csv (one row per module; frontend columns on the right), stats_by_model.csv
+        (one row per model), stats_detail.csv (one row per (module, model)), stats_frontend.csv
+        (one row per module: QWeb / OWL templates, JS, assets; FRONTEND_KEYS)
+Console summary: "Templates" and "JS" lines in addition to the existing ones.
+Stdlib only, Python >= 3.9; tree-sitter + tree-sitter-javascript optional (pip install omodi[js])
+for the structural JS stats (exports, classes, registries, patches). Package omodi.
 """
 from __future__ import annotations
 
@@ -47,6 +46,7 @@ from collections import Counter, defaultdict
 
 from . import compare as cmp
 from . import extract as ex
+from .output import Progress, add_output_args, check_output_args, wants
 
 KEYS = cmp.STAT_KEYS
 
@@ -77,8 +77,8 @@ def write_csv(path, key_cols, rows):
 
 
 def js_line_counter(old_idx, new_idx):
-    """line_counter pour compare_modules : lignes ajoutées / retirées exactes (difflib), fichiers relus
-    seulement quand leur sha1 diffère."""
+    """line_counter for compare_modules: exact added / removed lines (difflib), files re-read
+    only when their sha1 differs."""
     def read(idx, module, key):
         with open(idx.js_paths[(module, key)], encoding="utf-8", errors="replace") as fh:
             return fh.read().splitlines()
@@ -100,7 +100,7 @@ def js_line_counter(old_idx, new_idx):
 
 
 def unlisted_added(old_idx, new_idx, listed):
-    """Exports / classes ajoutés dans les modules non listés : destinations possibles des déplacements."""
+    """Exports / classes added in unlisted modules: possible destinations of moves."""
     pool = {"js_exports": [], "js_classes": []}
     for module in new_idx.modules:
         if module in listed:
@@ -116,10 +116,10 @@ def unlisted_added(old_idx, new_idx, listed):
 
 
 def print_table(title, rows, top):
-    cols = [("ch-", "fields_removed"), ("ch+", "fields_added"), ("ch~", "fields_modified"),
-            ("dét+", "field_attrs_added"), ("me-", "methods_removed"), ("me+", "methods_added"),
-            ("me~", "methods_modified"), ("vu-", "views_removed"), ("vu+", "views_added"),
-            ("vu~", "views_modified")]
+    cols = [("fi-", "fields_removed"), ("fi+", "fields_added"), ("fi~", "fields_modified"),
+            ("det+", "field_attrs_added"), ("me-", "methods_removed"), ("me+", "methods_added"),
+            ("me~", "methods_modified"), ("vw-", "views_removed"), ("vw+", "views_added"),
+            ("vw~", "views_modified")]
     rows = [r for r in rows if r[0] != "TOTAL"]
     main = [k for _, k in cols if k != "field_attrs_added"]
     rows = sorted(rows, key=lambda kv: -sum(kv[1].get(k, 0) for k in main))[:top]
@@ -132,38 +132,39 @@ def print_table(title, rows, top):
 
 
 def main(argv=None):
-    p = argparse.ArgumentParser(description="Stats de migration Odoo pour une liste de modules")
-    p.add_argument("--old", nargs="+", required=True, help="chemins d'addons de l'ancienne version")
-    p.add_argument("--new", nargs="+", required=True, help="chemins d'addons de la nouvelle version")
-    p.add_argument("--modules", nargs="+", help="modules à vérifier")
-    p.add_argument("--modules-file", help="fichier listant les modules (un par ligne ou séparés par des virgules)")
-    p.add_argument("--old-label", default="old")
-    p.add_argument("--new-label", default="new")
-    p.add_argument("-o", "--output", required=True, help="dossier de sortie")
+    p = argparse.ArgumentParser(prog="omodi stats", description="Odoo migration stats for a list of modules")
+    p.add_argument("--old", nargs="+", required=True, help="addons paths of the old version")
+    p.add_argument("--new", nargs="+", required=True, help="addons paths of the new version")
+    p.add_argument("--modules", nargs="+", help="modules to check")
+    p.add_argument("--modules-file", help="file listing the modules (one per line or comma-separated)")
+    p.add_argument("--old-label", default="old", help="label of the old version (e.g. 20.0)")
+    p.add_argument("--new-label", default="new", help="label of the new version (e.g. 21.0)")
+    add_output_args(p, "stats and intermediate extractions")
     p.add_argument("--all-modules", action="store_true",
-                   help="compter aussi les modules non listés qui touchent les mêmes modèles")
-    p.add_argument("--no-moves", action="store_true")
-    p.add_argument("--top", type=int, default=20, help="lignes affichées dans le résumé")
+                   help="also count unlisted modules touching the same models")
+    p.add_argument("--no-moves", action="store_true", help="do not detect moves between modules")
+    p.add_argument("--top", type=int, default=20, help="rows shown in the summary")
     a = p.parse_args(argv)
+    check_output_args(p, a)
+    progress = Progress(enabled=not a.quiet)
+    write_json_files, write_csv_files = wants(a, "json"), wants(a, "csv")
 
     modules = read_modules(a)
     if not modules:
-        p.error("donne au moins un module (--modules ou --modules-file)")
+        p.error("give at least one module (--modules or --modules-file)")
 
     t0 = time.time()
-    print(f"Indexation {a.old_label}...", file=sys.stderr)
-    old_idx = ex.Index(a.old, a.old_label)
-    print(f"Indexation {a.new_label}...", file=sys.stderr)
-    new_idx = ex.Index(a.new, a.new_label)
+    old_idx = ex.Index(a.old, a.old_label, progress=lambda n: progress.task(f"Indexing {a.old_label}", n))
+    new_idx = ex.Index(a.new, a.new_label, progress=lambda n: progress.task(f"Indexing {a.new_label}", n))
 
     gone = [m for m in modules if m in old_idx.modules and m not in new_idx.modules]
     new_only = [m for m in modules if m not in old_idx.modules and m in new_idx.modules]
     unknown = [m for m in modules if m not in old_idx.modules and m not in new_idx.modules]
     for m in unknown:
-        print(f"[warn] module {m} introuvable dans les deux versions", file=sys.stderr)
+        print(f"[warn] module {m} not found in either version", file=sys.stderr)
 
     models = sorted(old_idx.models_of(modules) | new_idx.models_of(modules))
-    print(f"{len(models)} modèles touchés par {len(modules)} modules", file=sys.stderr)
+    progress.info(f"{len(models)} models touched by {len(modules)} modules")
 
     wanted = set(modules)
     by_module = defaultdict(Counter)
@@ -171,35 +172,42 @@ def main(argv=None):
     detail = {}
     total = Counter()
 
-    # niveau module : templates non rattachés, OWL, JS, assets (extraction + diff par module listé)
+    # module level: unattached templates, OWL, JS, assets (extraction + diff per listed module)
     present = [m for m in modules if m in old_idx.modules or m in new_idx.modules]
     module_diffs = {}
     counter = js_line_counter(old_idx, new_idx)
-    for module in present:
+    update = progress.task("Modules", len(present))
+    for done, module in enumerate(present):
+        update(done, module)
         old_m = old_idx.extract_module(module) or {"module": module, "label": a.old_label}
         new_m = new_idx.extract_module(module) or {"module": module, "label": a.new_label}
-        if module in old_idx.modules:
+        if write_json_files and module in old_idx.modules:
             ex.write_json(old_m, os.path.join(a.output, "old", ex.module_filename(module)))
-        if module in new_idx.modules:
+        if write_json_files and module in new_idx.modules:
             ex.write_json(new_m, os.path.join(a.output, "new", ex.module_filename(module)))
         module_diffs[module] = cmp.compare_modules(old_m, new_m, detect_moves=not a.no_moves,
                                                    line_counter=counter)
+    update(len(present))
     if not a.no_moves:
         cmp.resolve_cross_module_moves(module_diffs, unlisted_added(old_idx, new_idx, set(present)))
     for module, mdiff in module_diffs.items():
-        cmp.write_json(mdiff, os.path.join(a.output, "diff", ex.module_filename(module)))
+        if write_json_files:
+            cmp.write_json(mdiff, os.path.join(a.output, "diff", ex.module_filename(module)))
         c = Counter(mdiff["stats"].get(module, {}))
-        if c:   # comme pour les modèles : pas de ligne vide dans by_module
+        if c:   # as for models: no empty row in by_module
             by_module[module].update(c)
             total.update(c)
 
-    for model in models:
+    update = progress.task("Models", len(models))
+    for done, model in enumerate(models):
+        update(done, model)
         fname = ex.model_filename(model)
         old_ext, new_ext = old_idx.extract(model), new_idx.extract(model)
-        ex.write_json(old_ext, os.path.join(a.output, "old", fname))
-        ex.write_json(new_ext, os.path.join(a.output, "new", fname))
         diff = cmp.compare_models(old_ext, new_ext, detect_moves=not a.no_moves)
-        cmp.write_json(diff, os.path.join(a.output, "diff", fname))
+        if write_json_files:
+            ex.write_json(old_ext, os.path.join(a.output, "old", fname))
+            ex.write_json(new_ext, os.path.join(a.output, "new", fname))
+            cmp.write_json(diff, os.path.join(a.output, "diff", fname))
         for module, c in diff["stats"].items():
             if not a.all_modules and module not in wanted:
                 continue
@@ -208,6 +216,7 @@ def main(argv=None):
             by_model[model].update(c)
             detail[(module, model)] = c
             total.update(c)
+    update(len(models))
 
     def clean(c):
         return {k: c[k] for k in KEYS if c.get(k)}
@@ -225,54 +234,60 @@ def main(argv=None):
         "by_model": {m: clean(c) for m, c in sorted(by_model.items())},
         "by_module_model": [{"module": m, "model": mo, **clean(c)} for (m, mo), c in sorted(detail.items())],
     }
-    ex.write_json(stats, os.path.join(a.output, "stats.json"))
-    write_csv(os.path.join(a.output, "stats_by_module.csv"), ["module"],
-              sorted(by_module.items()) + [("TOTAL", total)])
-    write_csv(os.path.join(a.output, "stats_by_model.csv"), ["model"],
-              sorted(by_model.items()) + [("TOTAL", total)])
-    write_csv(os.path.join(a.output, "stats_detail.csv"), ["module", "model"], sorted(detail.items()))
+    if write_json_files:
+        ex.write_json(stats, os.path.join(a.output, "stats.json"))
     frontend_total = Counter()
-    with open(os.path.join(a.output, "stats_frontend.csv"), "w", newline="", encoding="utf-8") as fh:
-        w = csv.writer(fh)
-        w.writerow(["module"] + cmp.FRONTEND_KEYS)
-        for module in present:
-            c = by_module.get(module, Counter())
-            frontend_total.update({k: c[k] for k in cmp.FRONTEND_KEYS})
-            w.writerow([module] + [c.get(k, 0) for k in cmp.FRONTEND_KEYS])
-        w.writerow(["TOTAL"] + [frontend_total.get(k, 0) for k in cmp.FRONTEND_KEYS])
+    frontend_rows = []
+    for module in present:
+        c = by_module.get(module, Counter())
+        frontend_total.update({k: c[k] for k in cmp.FRONTEND_KEYS})
+        frontend_rows.append([module] + [c.get(k, 0) for k in cmp.FRONTEND_KEYS])
+    if write_csv_files:
+        write_csv(os.path.join(a.output, "stats_by_module.csv"), ["module"],
+                  sorted(by_module.items()) + [("TOTAL", total)])
+        write_csv(os.path.join(a.output, "stats_by_model.csv"), ["model"],
+                  sorted(by_model.items()) + [("TOTAL", total)])
+        write_csv(os.path.join(a.output, "stats_detail.csv"), ["module", "model"], sorted(detail.items()))
+        with open(os.path.join(a.output, "stats_frontend.csv"), "w", newline="", encoding="utf-8") as fh:
+            w = csv.writer(fh)
+            w.writerow(["module"] + cmp.FRONTEND_KEYS)
+            w.writerows(frontend_rows)
+            w.writerow(["TOTAL"] + [frontend_total.get(k, 0) for k in cmp.FRONTEND_KEYS])
 
-    # résumé console
+    # console summary
     g = lambda k: total.get(k, 0)
-    print(f"\n{a.old_label} -> {a.new_label} | {len(modules)} modules, {len(models)} modèles "
+    print(f"\n{a.old_label} -> {a.new_label} | {len(modules)} modules, {len(models)} models "
           f"({time.time() - t0:.1f}s)")
     if gone:
-        print(f"Modules disparus : {', '.join(gone)}")
-    print(f"Champs     : -{g('fields_removed')} +{g('fields_added')} ~{g('fields_modified')} "
-          f"(détails +{g('field_attrs_added')} -{g('field_attrs_removed')} ~{g('field_attrs_changed')}, "
-          f"type changé {g('field_type_changed')}) déplacés {g('fields_moved_out')}")
-    print(f"Méthodes   : -{g('methods_removed')} +{g('methods_added')} ~{g('methods_modified')} "
-          f"déplacées {g('methods_moved_out')}")
-    print(f"Vues       : -{g('views_removed')} +{g('views_added')} ~{g('views_modified')} "
-          f"(nœuds -{g('view_nodes_removed')} +{g('view_nodes_added')})")
-    print(f"Contraintes: -{g('constraints_removed')} +{g('constraints_added')} ~{g('constraints_modified')}"
-          f" | attributs de classe ~{g('attributes_modified')}")
+        print(f"Removed modules: {', '.join(gone)}")
+    print(f"Fields     : -{g('fields_removed')} +{g('fields_added')} ~{g('fields_modified')} "
+          f"(details +{g('field_attrs_added')} -{g('field_attrs_removed')} ~{g('field_attrs_changed')}, "
+          f"type changed {g('field_type_changed')}) moved {g('fields_moved_out')}")
+    print(f"Methods    : -{g('methods_removed')} +{g('methods_added')} ~{g('methods_modified')} "
+          f"moved {g('methods_moved_out')}")
+    print(f"Views      : -{g('views_removed')} +{g('views_added')} ~{g('views_modified')} "
+          f"(nodes -{g('view_nodes_removed')} +{g('view_nodes_added')})")
+    print(f"Constraints: -{g('constraints_removed')} +{g('constraints_added')} ~{g('constraints_modified')}"
+          f" | class attributes ~{g('attributes_modified')}")
     print(f"Templates  : QWeb -{g('templates_removed')} +{g('templates_added')} ~{g('templates_modified')} "
-          f"(nœuds -{g('template_nodes_removed')} +{g('template_nodes_added')}) "
+          f"(nodes -{g('template_nodes_removed')} +{g('template_nodes_added')}) "
           f"| OWL -{g('owl_templates_removed')} +{g('owl_templates_added')} ~{g('owl_templates_modified')}")
-    print(f"JS         : fichiers -{g('js_files_removed')} +{g('js_files_added')} ~{g('js_files_modified')} "
-          f"(lignes -{g('js_lines_removed')} +{g('js_lines_added')}) "
+    print(f"JS         : files -{g('js_files_removed')} +{g('js_files_added')} ~{g('js_files_modified')} "
+          f"(lines -{g('js_lines_removed')} +{g('js_lines_added')}) "
           f"| exports -{g('js_exports_removed')} +{g('js_exports_added')} "
-          f"déplacés {g('js_exports_moved_out')} "
+          f"moved {g('js_exports_moved_out')} "
           f"| classes -{g('js_classes_removed')} +{g('js_classes_added')} ~{g('js_classes_modified')} "
-          f"(méthodes -{g('js_methods_removed')} +{g('js_methods_added')}) "
-          f"| registres -{g('js_registries_removed')} +{g('js_registries_added')} ~{g('js_registries_modified')} "
-          f"| patchs -{g('js_patches_removed')} +{g('js_patches_added')} ~{g('js_patches_modified')} "
+          f"(methods -{g('js_methods_removed')} +{g('js_methods_added')}) "
+          f"| registries -{g('js_registries_removed')} +{g('js_registries_added')} ~{g('js_registries_modified')} "
+          f"| patches -{g('js_patches_removed')} +{g('js_patches_added')} ~{g('js_patches_modified')} "
           f"| assets -{g('assets_entries_removed')} +{g('assets_entries_added')}")
-    print_table("Par module :", list(by_module.items()), a.top)
-    print_table("Modèles les plus touchés :", list(by_model.items()), a.top)
-    print(f"\nRésultats -> {a.output}/ (stats.json, stats_by_module.csv, stats_by_model.csv, "
-          f"stats_detail.csv, stats_frontend.csv)")
-
+    print_table("By module:", list(by_module.items()), a.top)
+    print_table("Most affected models:", list(by_model.items()), a.top)
+    if a.output is not None:
+        files = (["stats.json", "old/ new/ diff/"] if write_json_files else []) + \
+                (["stats_by_module.csv", "stats_by_model.csv", "stats_detail.csv", "stats_frontend.csv"]
+                 if write_csv_files else [])
+        print(f"\nResults -> {a.output}/ ({', '.join(files)})", file=sys.stderr)
 
 if __name__ == "__main__":
     main()

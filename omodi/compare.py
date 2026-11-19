@@ -1,33 +1,33 @@
 #!/usr/bin/env python3
 """
-omodi compare — compare deux extractions produites par omodi extract.
+omodi compare — compares two extractions produced by omodi extract.
 
-Usage :
+Usage:
   omodi compare v20/sale.order.json v21/sale.order.json -o sale.order.diff.json
   omodi compare v20/modules/web.json v21/modules/web.json -o web.diff.json
-  omodi compare v20/ v21/ -o diffs/    # tous les .json des deux dossiers (et de leur sous-dossier modules/)
-  omodi compare ...                            # même chose via le CLI installé
+  omodi compare v20/ v21/ -o diffs/    # every .json of the two folders (and of their modules/ subfolder)
+  omodi compare ...                            # same thing through the installed CLI
 
-Le format de chaque fichier est lu dans sa clé `format`.
+The format of each file is read from its `format` key.
 
-odoo-model-extract/1 -> odoo-model-diff/1. Module par module (clé (module, nom)) :
+odoo-model-extract/1 -> odoo-model-diff/1. Module by module (key (module, name)):
   - fields / methods / constraints : removed, added, modified, moved
-  - attributes                     : modified (ajout / retrait / changement de valeur)
-  - views, templates (rapports)    : removed, added, modified (nœuds d'arch ajoutés / retirés)
-"moved" = même nom qui disparaît d'un module et apparaît dans un autre module du même modèle.
+  - attributes                     : modified (addition / removal / value change)
+  - views, templates (reports)     : removed, added, modified (arch nodes added / removed)
+"moved" = same name that disappears from one module and appears in another module of the same model.
 
 odoo-module-extract/1 -> odoo-module-diff/1 :
   - qweb_templates, owl_templates, js_files, js_registries, js_patches : removed, added, modified
-  - js_exports, js_classes : removed, added, (modified pour les classes), moved. Un export / une classe qui
-    disparaît d'un chemin d'import et réapparaît ailleurs (même module) est "moved" avec from / to ;
-    "default" et "*" ne sont jamais appariés. Entre modules : resolve_cross_module_moves() (orchestrateur).
-  - assets : entrées ajoutées / retirées par bundle
-  js_files : modifié = sha1 différent. js_lines_* : estimé par la différence du nombre de lignes (décompte
-  exact par difflib fourni par omodi stats via line_counter).
+  - js_exports, js_classes : removed, added, (modified for classes), moved. An export / class that
+    disappears from an import path and reappears elsewhere (same module) is "moved" with from / to;
+    "default" and "*" are never paired. Across modules: resolve_cross_module_moves() (orchestrator).
+  - assets : entries added / removed per bundle
+  js_files: modified = different sha1. js_lines_*: estimated from the difference in line count (exact
+  count through difflib provided by omodi stats via line_counter).
 
-Les emplacements (loc) sont conservés pour info mais ne comptent pas comme une modification.
-Clés de stats : STAT_KEYS (les clés frontend sont à partir de FRONTEND_KEYS).
-Stdlib uniquement, Python >= 3.9.
+Locations (loc) are kept for information but do not count as a modification.
+Stats keys: STAT_KEYS (the frontend keys start at FRONTEND_KEYS).
+Stdlib only, Python >= 3.9.
 """
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ STAT_KEYS = [
     "constraints_removed", "constraints_added", "constraints_modified",
     "attributes_modified",
     "views_removed", "views_added", "views_modified", "view_nodes_removed", "view_nodes_added",
-    # templates QWeb (rattachés à un modèle ou non) et OWL
+    # QWeb templates (attached to a model or not) and OWL
     "templates_removed", "templates_added", "templates_modified",
     "template_nodes_removed", "template_nodes_added",
     "owl_templates_removed", "owl_templates_added", "owl_templates_modified",
@@ -62,7 +62,7 @@ STAT_KEYS = [
 ]
 FRONTEND_KEYS = STAT_KEYS[STAT_KEYS.index("templates_removed"):]
 MODULE_FORMAT = "odoo-module-diff/1"
-NO_MOVE_NAMES = {"default", "*"}   # trop génériques pour détecter un déplacement
+NO_MOVE_NAMES = {"default", "*"}   # too generic to detect a move
 
 
 def _strip_loc(d):
@@ -87,7 +87,7 @@ def _flatten(ext, section):
             for n, d in mod.get(section, {}).items()}
 
 
-# --- comparaison d'un élément -------------------------------------------------
+# --- comparison of one item -------------------------------------------------
 def _cmp_field(a, b, st):
     ch = {}
     if a["type"] != b["type"]:
@@ -129,7 +129,7 @@ def _cmp_view(a, b, st):
 
 
 def _cmp_template(a, b, st):
-    """Template QWeb serveur : mêmes règles que les vues, plus primary et les cibles t-call."""
+    """Server QWeb template: same rules as views, plus primary and the t-call targets."""
     ch = {}
     for k in ("inherit_id", "primary", "mode", "priority", "calls"):
         if a.get(k) != b.get(k):
@@ -158,10 +158,10 @@ def _brief(section, d):
     return {"loc": d.get("loc")}
 
 
-# --- comparaison d'un modèle --------------------------------------------------
+# --- comparison of a model --------------------------------------------------
 def compare_models(old, new, detect_moves=True):
     model = old.get("model") or new.get("model")
-    stats = defaultdict(Counter)  # stats[module][clé]
+    stats = defaultdict(Counter)  # stats[module][key]
     out = {
         "format": FORMAT,
         "model": model,
@@ -218,7 +218,7 @@ def compare_models(old, new, detect_moves=True):
             sec["moved"] = [{"name": a[1], "from": a[0], "to": b[0]} for a, b in moved]
         out[section] = sec
 
-    # attributs de classe
+    # class attributes
     o, n = _flatten(old, "attributes"), _flatten(new, "attributes")
     attr_mod = []
     for k in sorted(set(o) | set(n)):
@@ -238,7 +238,7 @@ def compare_models(old, new, detect_moves=True):
     return out
 
 
-# --- comparaison d'un module (odoo-module-extract/1) ---------------------------
+# --- comparison of a module (odoo-module-extract/1) ---------------------------
 def _cmp_owl(a, b, st):
     ch = {}
     for k in ("t_inherit", "t_inherit_mode"):
@@ -279,7 +279,7 @@ def _cmp_patch(a, b, st):
 
 
 def _simple_section(o, n, cmp, st, prefix):
-    """removed / added / modified pour un dict {clé: données} ; compteurs {prefix}_*."""
+    """removed / added / modified for a {key: data} dict; counters {prefix}_*."""
     removed = [{"name": k, "loc": o[k].get("loc")} for k in sorted(set(o) - set(n))]
     added = [{"name": k, "loc": n[k].get("loc")} for k in sorted(set(n) - set(o))]
     modified = []
@@ -302,13 +302,13 @@ def _named_item(module, key, data):
 
 
 def _pick(item, candidates):
-    """Candidat de même nature si possible (puis ordre stable)."""
+    """Candidate of the same kind if possible (then stable order)."""
     same = [c for c in candidates if c.get("kind") == item.get("kind")]
     return (same or candidates)[0] if candidates else None
 
 
 def _match_moves(removed, added, allow_same_module):
-    """Associe des éléments retirés à des éléments ajoutés de même nom. -> (moves, removed, added)."""
+    """Pairs removed items with added items of the same name. -> (moves, removed, added)."""
     pool = defaultdict(list)
     for it in added:
         if it["name"] not in NO_MOVE_NAMES:
@@ -333,7 +333,7 @@ def _move_entry(src, dst):
 
 
 def _named_section(o, n, module, detect_moves):
-    """Exports / classes : clés "chemin_import::nom"."""
+    """Exports / classes: keys "import_path::name"."""
     removed = [_named_item(module, k, o[k]) for k in sorted(set(o) - set(n))]
     added = [_named_item(module, k, n[k]) for k in sorted(set(n) - set(o))]
     moved = []
@@ -344,7 +344,7 @@ def _named_section(o, n, module, detect_moves):
 
 
 def _restat_names(diff):
-    """Recalcule les compteurs removed/added/moved des exports et classes depuis les listes du diff."""
+    """Recomputes the removed/added/moved counters of exports and classes from the diff lists."""
     module = diff["module"]
     st = Counter(diff["stats"].get(module, {}))
     for section, prefix in (("js_exports", "js_exports"), ("js_classes", "js_classes")):
@@ -370,12 +370,12 @@ def _store_stats(diff, st):
 
 
 def compare_modules(old, new, detect_moves=True, line_counter=None):
-    """Compare deux extractions odoo-module-extract/1 d'un même module -> odoo-module-diff/1.
+    """Compares two odoo-module-extract/1 extractions of the same module -> odoo-module-diff/1.
 
-    line_counter(module, clé_fichier, ancien, nouveau) -> (lignes_ajoutées, lignes_retirées) permet de
-    fournir un décompte exact (difflib) ; par défaut js_lines_* est estimé par la différence du nombre
-    de lignes (fichier ajouté : toutes ses lignes ajoutées ; supprimé : toutes retirées).
-    Les déplacements entre modules se résolvent après coup : resolve_cross_module_moves().
+    line_counter(module, file_key, old, new) -> (lines_added, lines_removed) allows providing an exact
+    count (difflib); by default js_lines_* is estimated from the difference in line count
+    (added file: all its lines added; removed: all removed).
+    Moves across modules are resolved afterwards: resolve_cross_module_moves().
     """
     module = old.get("module") or new.get("module")
     st = Counter()
@@ -388,7 +388,7 @@ def compare_modules(old, new, detect_moves=True, line_counter=None):
     out["owl_templates"] = _simple_section(g(old, "owl_templates"), g(new, "owl_templates"),
                                            _cmp_owl, st, "owl_templates")
 
-    # fichiers JS (niveau 1)
+    # JS files (level 1)
     o, n = g(old, "js_files"), g(new, "js_files")
     files = {"removed": [{"name": k, "lines": o[k].get("lines")} for k in sorted(set(o) - set(n))],
              "added": [{"name": k, "lines": n[k].get("lines")} for k in sorted(set(n) - set(o))],
@@ -413,7 +413,7 @@ def compare_modules(old, new, detect_moves=True, line_counter=None):
     st["js_files_modified"] += len(files["modified"])
     out["js_files"] = files
 
-    # exports et classes (clés "chemin::nom") : déplacements dans le module
+    # exports and classes (keys "path::name"): moves inside the module
     for section in ("js_exports", "js_classes"):
         removed, added, moved = _named_section(g(old, section), g(new, section), module, detect_moves)
         modified = []
@@ -432,7 +432,7 @@ def compare_modules(old, new, detect_moves=True, line_counter=None):
     out["js_patches"] = _simple_section(g(old, "js_patches"), g(new, "js_patches"),
                                         _cmp_patch, st, "js_patches")
 
-    # assets : entrées ajoutées / retirées par bundle
+    # assets: entries added / removed per bundle
     oa, na = g(old, "assets"), g(new, "assets")
     mods = []
     for bundle in sorted(set(oa) | set(na)):
@@ -451,12 +451,12 @@ def compare_modules(old, new, detect_moves=True, line_counter=None):
 
 
 def resolve_cross_module_moves(diffs, extra_added=None):
-    """Détecte les exports / classes qui changent de module (même nom ailleurs). Modifie `diffs` en place.
+    """Detects exports / classes that change module (same name elsewhere). Modifies `diffs` in place.
 
-    diffs       : {module: diff odoo-module-diff/1} (déjà passés par compare_modules)
-    extra_added : {"js_exports": [...], "js_classes": [...]} : éléments ajoutés dans des modules sans diff
-                  ({"module","path","name","kind"}), utilisés seulement comme destination possible.
-    Les entrées `moved` sont ajoutées au diff source et au diff de destination s'il existe.
+    diffs       : {module: odoo-module-diff/1 diff} (already processed by compare_modules)
+    extra_added : {"js_exports": [...], "js_classes": [...]} : items added in modules without a diff
+                  ({"module","path","name","kind"}), used only as a possible destination.
+    `moved` entries are added to the source diff and to the destination diff if it exists.
     """
     for section in ("js_exports", "js_classes"):
         removed = [it for d in diffs.values() for it in d[section]["removed"]]
@@ -477,17 +477,17 @@ def resolve_cross_module_moves(diffs, extra_added=None):
 
 
 def compare(old, new, detect_moves=True, line_counter=None):
-    """Compare deux extractions du même format (le format est lu dans la clé `format`)."""
+    """Compares two extractions of the same format (the format is read from the `format` key)."""
     fo, fn = old.get("format"), new.get("format")
     if fo and fn and fo.split("/")[0] != fn.split("/")[0]:
-        raise ValueError(f"formats incompatibles : {fo} / {fn}")
+        raise ValueError(f"incompatible formats : {fo} / {fn}")
     fmt = fo or fn or ""
     if fmt.startswith("odoo-module-extract"):
         return compare_modules(old, new, detect_moves, line_counter)
     return compare_models(old, new, detect_moves)
 
 
-# --- E/S ----------------------------------------------------------------------
+# --- I/O ----------------------------------------------------------------------
 def load(path):
     if path is None or not os.path.exists(path):
         return EMPTY
@@ -507,20 +507,20 @@ def summary_line(diff):
     if diff["format"] == MODULE_FORMAT:
         return (f"{diff['module']}: templates -{g('templates_removed')} +{g('templates_added')} "
                 f"~{g('templates_modified')} | OWL -{g('owl_templates_removed')} +{g('owl_templates_added')} "
-                f"~{g('owl_templates_modified')} | JS fichiers -{g('js_files_removed')} +{g('js_files_added')} "
+                f"~{g('owl_templates_modified')} | JS files -{g('js_files_removed')} +{g('js_files_added')} "
                 f"~{g('js_files_modified')} exports -{g('js_exports_removed')} +{g('js_exports_added')} "
-                f"déplacés {g('js_exports_moved_out')}")
-    return (f"{diff['model']}: champs -{g('fields_removed')} +{g('fields_added')} ~{g('fields_modified')} "
-            f"| méthodes -{g('methods_removed')} +{g('methods_added')} ~{g('methods_modified')} "
-            f"| vues -{g('views_removed')} +{g('views_added')} ~{g('views_modified')}")
+                f"moved {g('js_exports_moved_out')}")
+    return (f"{diff['model']}: fields -{g('fields_removed')} +{g('fields_added')} ~{g('fields_modified')} "
+            f"| methods -{g('methods_removed')} +{g('methods_added')} ~{g('methods_modified')} "
+            f"| views -{g('views_removed')} +{g('views_added')} ~{g('views_modified')}")
 
 
 def main(argv=None):
-    p = argparse.ArgumentParser(description="Compare deux extractions omodi extract")
-    p.add_argument("old", help="fichier JSON ou dossier (ancienne version)")
-    p.add_argument("new", help="fichier JSON ou dossier (nouvelle version)")
-    p.add_argument("-o", "--output", required=True, help="fichier .json ou dossier si on compare des dossiers")
-    p.add_argument("--no-moves", action="store_true", help="ne pas détecter les déplacements entre modules")
+    p = argparse.ArgumentParser(prog="omodi compare", description="Compare two omodi extract extractions")
+    p.add_argument("old", help="JSON file or folder (old version)")
+    p.add_argument("new", help="JSON file or folder (new version)")
+    p.add_argument("-o", "--output", required=True, help="output .json file, or folder when comparing folders")
+    p.add_argument("--no-moves", action="store_true", help="do not detect moves between modules")
     a = p.parse_args(argv)
 
     try:
@@ -544,7 +544,7 @@ def _main(p, a):
         write_json(diff, a.output)
         print(summary_line(diff))
     else:
-        p.error("old et new doivent être deux fichiers ou deux dossiers")
+        p.error("old and new must be two files or two folders")
 
 
 if __name__ == "__main__":

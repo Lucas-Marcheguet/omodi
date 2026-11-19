@@ -1,4 +1,4 @@
-"""Point d'entrée unique : omodi extract|compare|stats [options...]."""
+"""Single entry point: omodi extract|compare|stats|impact [options...]."""
 from __future__ import annotations
 
 import sys
@@ -6,17 +6,24 @@ import sys
 from . import __version__
 
 COMMANDS = {
-    "extract": ("extract", "extrait la définition de modèles / modules Odoo"),
-    "compare": ("compare", "compare deux extractions"),
-    "stats": ("migration_stats", "stats de migration pour une liste de modules"),
-    "impact": ("impact", "ce à quoi faire attention pour monter de version des modules custom"),
+    "extract": ("extract", "extract the definition of Odoo models / modules"),
+    "compare": ("compare", "compare two extractions"),
+    "stats": ("migration_stats", "migration stats for a list of modules"),
+    "impact": ("impact", "what to watch out for when upgrading custom modules"),
 }
 
 
 def _usage():
-    lines = ["usage: omodi {extract,compare,stats,impact} [options...]", "", "commandes :"]
+    lines = ["usage: omodi {extract,compare,stats,impact} [options...]", "", "commands:"]
     lines += [f"  {name:<8} {desc}" for name, (_, desc) in COMMANDS.items()]
-    lines += ["", "omodi <commande> --help pour l'aide d'une commande ; --version pour la version."]
+    lines += ["",
+              "stats / impact options common to both:",
+              "  -o [DIR]      also write files to DIR (default ./omodi-output); without -o, console only",
+              "  -f FORMAT     json, csv or all (default) - file format written with -o; the Markdown",
+              "                report is always printed on the console",
+              "  -q            no progress display",
+              "",
+              "omodi <command> --help for the options of a command; --version for the version."]
     return "\n".join(lines)
 
 
@@ -30,7 +37,7 @@ def main(argv=None):
         return
     cmd = argv[0]
     if cmd not in COMMANDS:
-        print(f"commande inconnue : {cmd}\n\n{_usage()}", file=sys.stderr)
+        print(f"unknown command: {cmd}\n\n{_usage()}", file=sys.stderr)
         sys.exit(2)
     import importlib
     module = importlib.import_module(f".{COMMANDS[cmd][0]}", __package__)

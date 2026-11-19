@@ -1,3 +1,4 @@
+import csv
 import json
 import os
 import re
@@ -8,7 +9,7 @@ import unittest
 from omodi import cli, impact, js
 from tests.helpers import IMP_OLD, IMP_NEW, IMP_CUSTOM, quiet
 
-needs_ts = unittest.skipUnless(js.HAS_TREE_SITTER, "tree-sitter non installé")
+needs_ts = unittest.skipUnless(js.HAS_TREE_SITTER, "tree-sitter not installed")
 ARGS = ["--old", IMP_OLD, "--new", IMP_NEW, "--custom", IMP_CUSTOM, "--old-label", "A", "--new-label", "B"]
 
 
@@ -19,11 +20,10 @@ def run(tmp, *extra):
 class ReportTest(unittest.TestCase):
     def test_end_to_end_report_json_and_markdown(self):
         with tempfile.TemporaryDirectory() as tmp:
-            _, out, _ = run(tmp)
+            _, md, _ = run(tmp)
             with open(os.path.join(tmp, "impact.json"), encoding="utf-8") as fh:
                 rep = json.load(fh)
-            with open(os.path.join(tmp, "impact.md"), encoding="utf-8") as fh:
-                md = fh.read()
+            self.assertFalse(os.path.exists(os.path.join(tmp, "impact.md")))
         self.assertEqual(rep["format"], "odoo-impact/1")
         self.assertEqual((rep["old_label"], rep["new_label"]), ("A", "B"))
         mod = rep["modules"]["cust"]
@@ -35,11 +35,9 @@ class ReportTest(unittest.TestCase):
         order = [impact.LEVELS.index(f["level"]) for f in mod["findings"]]
         self.assertEqual(order, sorted(order))
         self.assertIn("## Module `cust`", md)
-        self.assertEqual(int(re.search(r"### Cassant \((\d+)\)", md).group(1)), c["breaking"])
-        for title in ("### À vérifier", "### Info", "## Limites"):
+        self.assertEqual(int(re.search(r"### Breaking \((\d+)\)", md).group(1)), c["breaking"])
+        for title in ("### To review", "### Info", "## Limits"):
             self.assertIn(title, md)
-        self.assertIn("cust: ", out)
-        self.assertIn("impact.md", out)
         self.assertTrue(rep["limits"])
         self.assertIn("fields_removed", rep["upstream_stats"])
 
@@ -93,15 +91,13 @@ class ReportTest(unittest.TestCase):
     def test_empty_custom_module_gives_valid_empty_report(self):
         from tests.helpers import tmp_addons
         with tmp_addons({"m/__manifest__.py": "{'depends': ['up']}"}) as custom, tempfile.TemporaryDirectory() as tmp:
-            quiet(impact.main, ["--old", IMP_OLD, "--new", IMP_NEW, "--custom", custom, "--modules", "m",
-                                "-o", tmp])
+            _, md, _ = quiet(impact.main, ["--old", IMP_OLD, "--new", IMP_NEW, "--custom", custom,
+                                           "--modules", "m", "-o", tmp])
             with open(os.path.join(tmp, "impact.json"), encoding="utf-8") as fh:
                 mod = json.load(fh)["modules"]["m"]
-            with open(os.path.join(tmp, "impact.md"), encoding="utf-8") as fh:
-                md = fh.read()
         self.assertEqual(mod["findings"], [])
         self.assertEqual(mod["counts"], {"breaking": 0, "review": 0, "info": 0, "total": 0})
-        self.assertIn("Rien à signaler.", md)
+        self.assertIn("Nothing to report.", md)
 
     def test_omodi_impact_dispatch(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -111,6 +107,39 @@ class ReportTest(unittest.TestCase):
     def test_help_lists_impact(self):
         _, out, _ = quiet(cli.main, [])
         self.assertIn("impact", out)
+        self.assertIn("-o [DIR]", out)
+
+    def test_no_output_prints_markdown_only(self):
+        _, out, _ = quiet(impact.main, [*ARGS, "--modules", "cust"])
+        self.assertIn("## Module `cust`", out)
+        self.assertFalse(os.path.exists("omodi-output"))
+
+    def test_output_without_value_uses_default_dir_and_format_csv(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = os.getcwd()
+            os.chdir(tmp)
+            try:
+                quiet(impact.main, [*ARGS, "--modules", "cust", "-f", "csv", "-o"])
+                self.assertTrue(os.path.isfile(os.path.join(tmp, "omodi-output", "impact.csv")))
+                self.assertFalse(os.path.exists(os.path.join(tmp, "omodi-output", "impact.json")))
+                with open(os.path.join(tmp, "omodi-output", "impact.csv"), encoding="utf-8", newline="") as fh:
+                    rows = list(csv.reader(fh))
+            finally:
+                os.chdir(cwd)
+        self.assertEqual(rows[0], impact.CSV_COLUMNS)
+        self.assertGreater(len(rows), 1)
+
+    def test_format_without_output_is_an_error(self):
+        with self.assertRaises(SystemExit) as cm:
+            quiet(impact.main, [*ARGS, "--modules", "cust", "-f", "json"])
+        self.assertEqual(cm.exception.code, 2)
+
+    def test_progress_on_stderr_not_stdout(self):
+        _, out, err = quiet(impact.main, [*ARGS, "--modules", "cust"])
+        self.assertIn("Indexing", err)
+        self.assertNotIn("Indexing", out)
+        _, _, err = quiet(impact.main, [*ARGS, "--modules", "cust", "-q"])
+        self.assertEqual(err, "")
 
     def test_markdown_escapes_pipes(self):
         rep = {"format": "odoo-impact/1", "old_label": "A", "new_label": "B", "limits": [],

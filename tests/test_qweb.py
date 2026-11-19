@@ -13,7 +13,7 @@ class QwebReportTest(unittest.TestCase):
     def test_report_template_attached_to_model(self):
         t = templates(OLD)
         self.assertIn("demo.report_demo", t)
-        self.assertIn("demo.report_demo_ext", t)  # hérité via inherit_id
+        self.assertIn("demo.report_demo_ext", t)  # inherited via inherit_id
 
     def test_tag_report_supported(self):
         self.assertIn("demo.report_tag", templates(OLD))
