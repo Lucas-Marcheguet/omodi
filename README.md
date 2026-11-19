@@ -6,8 +6,20 @@ Migration statistics between two Odoo versions (models, QWeb, OWL, JS).
 
 Requires Python >= 3.9.
 
+Quick install (no clone needed):
+
 ```bash
-git clone <TODO: repository URL> omodi
+curl -fsSL https://raw.githubusercontent.com/Lucas-Marcheguet/omodi/main/install.sh | bash
+# or
+wget -qO- https://raw.githubusercontent.com/Lucas-Marcheguet/omodi/main/install.sh | bash
+```
+
+Pass options after `bash -s --`, e.g. `... | bash -s -- --js`.
+
+From a clone of <https://github.com/Lucas-Marcheguet/omodi>:
+
+```bash
+git clone https://github.com/Lucas-Marcheguet/omodi.git
 cd omodi
 ./install.sh
 ```
@@ -21,6 +33,7 @@ Options:
 | Option          | Description                                          |
 | --------------- | ---------------------------------------------------- |
 | `--js`          | also install the optional JS parsing deps (tree-sitter) |
+| `--ref REF`     | branch/tag/commit to install when not run from a clone (default `main`) |
 | `--prefix DIR`  | virtualenv location (default `~/.local/share/omodi`) |
 | `--bin-dir DIR` | symlink location (default `~/.local/bin`)            |
 | `--uninstall`   | remove the symlink and the virtualenv                |
