@@ -34,9 +34,9 @@ class ReportTest(unittest.TestCase):
         self.assertEqual(c["total"], c["breaking"] + c["review"] + c["info"])
         order = [impact.LEVELS.index(f["level"]) for f in mod["findings"]]
         self.assertEqual(order, sorted(order))
-        self.assertIn("## Module `cust`", md)
-        self.assertEqual(int(re.search(r"### Breaking \((\d+)\)", md).group(1)), c["breaking"])
-        for title in ("### To review", "### Info", "## Limits"):
+        self.assertIn("cust", md)
+        self.assertEqual(int(re.search(r"BREAKING \((\d+)\)", md).group(1)), c["breaking"])
+        for title in ("TO REVIEW", "INFO", "limits"):
             self.assertIn(title, md)
         self.assertTrue(rep["limits"])
         self.assertIn("fields_removed", rep["upstream_stats"])
@@ -97,7 +97,7 @@ class ReportTest(unittest.TestCase):
                 mod = json.load(fh)["modules"]["m"]
         self.assertEqual(mod["findings"], [])
         self.assertEqual(mod["counts"], {"breaking": 0, "review": 0, "info": 0, "total": 0})
-        self.assertIn("Nothing to report.", md)
+        self.assertNotIn("BREAKING", md)
 
     def test_omodi_impact_dispatch(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -109,9 +109,10 @@ class ReportTest(unittest.TestCase):
         self.assertIn("impact", out)
         self.assertIn("-o [DIR]", out)
 
-    def test_no_output_prints_markdown_only(self):
+    def test_no_output_prints_report_only(self):
         _, out, _ = quiet(impact.main, [*ARGS, "--modules", "cust"])
-        self.assertIn("## Module `cust`", out)
+        self.assertIn("cust", out)
+        self.assertNotIn("\x1b[", out)   # no colors off a terminal
         self.assertFalse(os.path.exists("omodi-output"))
 
     def test_output_without_value_uses_default_dir_and_format_csv(self):
@@ -141,15 +142,17 @@ class ReportTest(unittest.TestCase):
         _, _, err = quiet(impact.main, [*ARGS, "--modules", "cust", "-q"])
         self.assertEqual(err, "")
 
-    def test_markdown_escapes_pipes(self):
+    def test_colors_only_when_enabled(self):
+        from omodi import term
         rep = {"format": "odoo-impact/1", "old_label": "A", "new_label": "B", "limits": [],
                "upstream_stats": {}, "modules": {"m": {
                    "closure": {"old": [], "upstream": [], "missing_in_new": [], "unresolved": []},
                    "counts": {"breaking": 1, "review": 0, "info": 0, "total": 1},
                    "findings": [impact.finding("breaking", "field", "r", "a | b", "m", "m/x.py:1", "n", {"name": "u|v"})]}}}
-        md = impact.render_markdown(rep)
-        self.assertIn("a \\| b", md)
-        self.assertIn("u\\|v", md)
+        self.assertNotIn("\x1b[", impact.render_console(rep, term.Style(False)))
+        colored = impact.render_console(rep, term.Style(True))
+        self.assertIn("\x1b[", colored)
+        self.assertIn("a | b", term._ANSI.sub("", colored))
 
 
 if __name__ == "__main__":

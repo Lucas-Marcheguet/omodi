@@ -19,8 +19,8 @@ def _usage():
     lines += ["",
               "stats / impact options common to both:",
               "  -o [DIR]      also write files to DIR (default ./omodi-output); without -o, console only",
-              "  -f FORMAT     json, csv or all (default) - file format written with -o; the Markdown",
-              "                report is always printed on the console",
+              "  -f FORMAT     json, csv or all (default) - file format written with -o; the colored",
+              "                report is always printed on the console (NO_COLOR=1: no colors)",
               "  -q            no progress display",
               "",
               "omodi <command> --help for the options of a command; --version for the version."]

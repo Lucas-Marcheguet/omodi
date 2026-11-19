@@ -41,7 +41,7 @@ class OrchestratorTest(unittest.TestCase):
             self.assertEqual((demo["assets_entries_removed"], demo["assets_entries_added"]), (1, 1))
             # lignes exactes (difflib) : voir diff(1) des fixtures
             self.assertEqual((demo["js_lines_added"], demo["js_lines_removed"]), (3 + 7, 2 + 8))
-            self.assertIn("Templates", out)
+            self.assertIn("QWeb", out)
             self.assertIn("JS", out)
 
     @needs_ts
@@ -96,7 +96,7 @@ class OrchestratorTest(unittest.TestCase):
                 self.assertEqual(os.listdir(tmp), [])
             finally:
                 os.chdir(cwd)
-        self.assertIn("Templates", out)
+        self.assertIn("QWeb", out)
         self.assertIn("Indexing", err)
 
     def test_format_csv_only_and_json_only(self):

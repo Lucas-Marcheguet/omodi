@@ -17,7 +17,7 @@ def add_output_args(parser, what):
                         help=f"also write {what} to files in DIR (default DIR when no value: ./{DEFAULT_OUTPUT}); "
                              "without -o, only the console report is produced")
     parser.add_argument("-f", "--format", choices=FORMATS, default=None,
-                        help="file format(s) written with -o (default: all). The Markdown report is "
+                        help="file format(s) written with -o (default: all). The colored report is "
                              "always printed on the console, never written to a file")
     parser.add_argument("-q", "--quiet", action="store_true", help="do not display the progress")
 

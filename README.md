@@ -64,9 +64,9 @@ Running `omodi` alone prints the help.
 
 Output (`stats` and `impact`):
 
-- Without `-o`, the report is printed on the console only (Markdown for `impact`, summary for `stats`); nothing is written.
+- Without `-o`, the report is printed on the console only (colored, graphical; `NO_COLOR=1` disables colors, `FORCE_COLOR=1` forces them); nothing is written.
 - `-o [DIR]` also writes files to `DIR` (`./omodi-output` if no value is given).
-- `-f {json,csv,all}` picks the file format written with `-o` (default `all`). The Markdown report is never written to a file.
+- `-f {json,csv,all}` picks the file format written with `-o` (default `all`). The console report is never written to a file.
 - Progress is shown on stderr; `-q` disables it.
 
 Examples:

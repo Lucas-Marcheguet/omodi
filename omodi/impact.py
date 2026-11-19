@@ -16,7 +16,7 @@ Usage:
   (--modules-file modules.txt: one module per line or comma-separated, # = comment)
 A custom module is looked up first in --custom, then in --old; a copy in --new is ignored.
 
-Output: the Markdown report (one heading per module) is always printed on the console, never written to a file.
+Output: the colored report (one block per module) is always printed on the console, never written to a file.
 With -o [DIR] (default ./omodi-output), -f {json,csv,all} also writes OUT/impact.json (format odoo-impact/1)
 and/or OUT/impact.csv (one row per finding).
 
@@ -44,6 +44,7 @@ from . import compare as cmp
 from . import extract as ex
 from . import js
 from .migration_stats import read_modules
+from . import term
 from .output import Progress, add_output_args, check_output_args, wants
 
 LEVELS = ("breaking", "review", "info")
@@ -727,39 +728,45 @@ def analyze(old_paths, new_paths, custom_paths, modules, old_label=None, new_lab
             "limits": limits}
 
 
-def _cell(text):
-    return str(text if text is not None else "").replace("|", "\\|").replace("\n", " ")
+LEVEL_STYLE = {"breaking": ("red", "✖"), "review": ("yellow", "▲"), "info": ("blue", "●")}
 
 
-def render_markdown(report):
-    """Readable report: one heading per module, three levels, Category / Custom / Upstream / Finding table."""
-    lines = [f"# Upgrade impact {report.get('old_label') or 'old'} -> "
-             f"{report.get('new_label') or 'new'}", ""]
+def render_console(report, style=None):
+    """Colored console report: banner, one block per module (counts + bar), findings by level."""
+    st = style or term.Style()
+    out = ["", st(" OMODI ", "bold", "white") + "  " + st("upgrade impact", "bold") + "  "
+           + st(report.get("old_label") or "old", "cyan", "bold") + st(" ➜ ", "gray")
+           + st(report.get("new_label") or "new", "green", "bold"), ""]
     for module, mod in report["modules"].items():
         c, cl = mod["counts"], mod["closure"]
-        lines += [f"## Module `{module}`", "",
-                  f"Breaking: **{c['breaking']}** | To review: **{c['review']}** | Info: **{c['info']}**", "",
-                  f"Upstream dependencies analyzed ({len(cl['upstream'])}): "
-                  + (", ".join(f"`{m}`" for m in cl["upstream"]) or "none")]
+        out.append(st.title(module))
+        chips = "   ".join(st(f"{LEVEL_STYLE[lv][1]} {c[lv]} {LEVEL_LABELS[lv]}", LEVEL_STYLE[lv][0], "bold")
+                           if c[lv] else st(f"{LEVEL_STYLE[lv][1]} 0 {LEVEL_LABELS[lv]}", "gray") for lv in LEVELS)
+        out.append(f"  {chips}   " + st.bar([(c[lv], LEVEL_STYLE[lv][0]) for lv in LEVELS], 20))
+        out.append("  " + st("deps ", "gray") + (", ".join(cl["upstream"]) or st("none", "gray"))
+                   + st(f"  ({len(cl['upstream'])})", "gray"))
         if cl["missing_in_new"]:
-            lines.append("Missing from the new version: " + ", ".join(f"`{m}`" for m in cl["missing_in_new"]))
-        lines.append("")
+            out.append("  " + st("✖ gone in new: ", "red", "bold") + st(", ".join(cl["missing_in_new"]), "red"))
         for level in LEVELS:
             items = [f for f in mod["findings"] if f["level"] == level]
-            lines += [f"### {LEVEL_LABELS[level]} ({len(items)})", ""]
             if not items:
-                lines += ["Nothing to report.", ""]
                 continue
-            lines += ["| Category | Custom | Upstream | Finding |", "|---|---|---|---|"]
+            col, icon = LEVEL_STYLE[level]
+            out += ["", f"  {st(icon + ' ' + LEVEL_LABELS[level].upper(), col, 'bold')} {st(f'({len(items)})', 'gray')}"]
+            rows = []
             for f in items:
                 up = f["upstream"]
-                target = up.get("name", "") + (f" -> {up['to_module']}" if up.get("to_module") else "")
-                note = " (heuristic)" if f["confidence"] == "heuristic" else ""
-                lines.append(f"| {_cell(f['category'])} | `{_cell(f['custom']['loc'] or f['custom']['module'])}` | "
-                             f"{_cell(target)} | {_cell(f['message'])}{note} |")
-            lines.append("")
-    lines += ["## Limits", ""] + [f"- {x}" for x in report["limits"]] + [""]
-    return "\n".join(lines)
+                target = up.get("name", "") + (f" ➜ {up['to_module']}" if up.get("to_module") else "")
+                note = st(" ~", "magenta") if f["confidence"] == "heuristic" else ""
+                rows.append([st(f["category"], col), st(f["custom"]["loc"] or f["custom"]["module"], "cyan"),
+                             st(target, "white") if target else st("-", "gray"), f["message"] + note])
+            out += st.table(["category", "custom", "upstream", "finding"], rows, indent=4)
+        out.append("")
+    out.append(st("legend  ", "gray") + st("~", "magenta") + st(" = heuristic finding", "gray"))
+    if report["limits"]:
+        out += [""] + [st("  limits", "gray", "bold")] + [st(f"  · {x}", "gray") for x in report["limits"]]
+    out.append("")
+    return "\n".join(out)
 
 
 CSV_COLUMNS = ["module", "level", "category", "rule", "confidence", "custom_loc", "custom_name",
@@ -801,7 +808,7 @@ def main(argv=None):
                          Progress(enabled=not a.quiet))
     except ImpactError as e:
         p.error(str(e))
-    print(render_markdown(report))   # the Markdown report always goes to the console
+    print(render_console(report))   # the colored report always goes to the console
     written = []
     if wants(a, "json"):
         ex.write_json(report, os.path.join(a.output, "impact.json"))
@@ -810,7 +817,8 @@ def main(argv=None):
         write_findings_csv(report, os.path.join(a.output, "impact.csv"))
         written.append("impact.csv")
     if written and not a.quiet:
-        print(f"Results -> {a.output}/ ({', '.join(written)}) in {time.time() - t0:.1f}s", file=sys.stderr)
+        print(term.paint(f"✔ results ➜ {a.output}/ ", "green", "bold", on=term.color_enabled(sys.stderr))
+              + f"({', '.join(written)}) in {time.time() - t0:.1f}s", file=sys.stderr)
 
 if __name__ == "__main__":
     main()
